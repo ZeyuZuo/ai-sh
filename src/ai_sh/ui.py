@@ -27,7 +27,7 @@ def render_command(result: CommandResult) -> None:
 
     if result.clarification and not result.command:
         console.print(
-            Panel(result.clarification, title="需要澄清", border_style="yellow")
+            Panel(Text(result.clarification), title="需要澄清", border_style="yellow")
         )
         return
 
@@ -42,11 +42,11 @@ def render_command(result: CommandResult) -> None:
     table.add_column(style="bold")
     table.add_column()
     table.add_row("风险", f"[{risk_style}]{result.risk_level}[/{risk_style}]")
-    table.add_row("说明", result.explanation)
+    table.add_row("说明", Text(result.explanation))
     if result.risk_reason:
-        table.add_row("原因", result.risk_reason)
+        table.add_row("原因", Text(result.risk_reason))
     if result.alternatives:
-        table.add_row("备选", "\n".join(result.alternatives))
+        table.add_row("备选", Text("\n".join(result.alternatives)))
 
     console.print(Panel(syntax, title="生成的命令", border_style=risk_style))
     console.print(table)
@@ -55,13 +55,13 @@ def render_command(result: CommandResult) -> None:
 def render_block(reason: str) -> None:
     """Render a local safety block."""
 
-    console.print(Panel(reason, title="已拦截危险命令", border_style="red"))
+    console.print(Panel(Text(reason), title="已拦截危险命令", border_style="red"))
 
 
 def render_error(message: str) -> None:
     """Render a user-facing error."""
 
-    console.print(Panel(message, title="错误", border_style="red"))
+    console.print(Panel(Text(message), title="错误", border_style="red"))
 
 
 def render_execution_result(result: ExecutionResult) -> None:

@@ -60,6 +60,14 @@ uv build --python 3.14
 export SILICONFLOW_API="your-siliconflow-api-key"
 ```
 
+注意需要使用 `export`，否则它只是当前 shell 的局部变量，`uv run` 启动的 Python 子进程读不到。
+
+也可以在项目根目录创建 `.env`：
+
+```bash
+SILICONFLOW_API="your-siliconflow-api-key"
+```
+
 也可以生成配置文件：
 
 ```bash
@@ -90,7 +98,7 @@ language = "zh"
 hard_block_enabled = true
 ```
 
-读取优先级是：`SILICONFLOW_API` 环境变量优先，其次是配置文件中的 `api_key`。
+读取优先级是：已 export 的 `SILICONFLOW_API` 环境变量优先，其次是当前目录 `.env`、`~/.ai-sh/.env`，最后是配置文件中的 `api_key`。
 
 ## Usage
 

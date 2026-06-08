@@ -21,6 +21,18 @@ def test_load_config_defaults_and_env_override(tmp_path, monkeypatch) -> None:
     assert config.behavior.default_confirm == "n"
 
 
+def test_load_config_ignores_empty_env_and_reads_dotenv(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text('SILICONFLOW_API="secret-from-dotenv"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SILICONFLOW_API", "")
+
+    config = load_config(config_path)
+
+    assert config.api.api_key == "secret-from-dotenv"
+
+
 def test_load_config_reads_file_values(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("SILICONFLOW_API", raising=False)
     config_path = tmp_path / "config.toml"

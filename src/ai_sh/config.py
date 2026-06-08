@@ -19,6 +19,7 @@ CONFIG_DIR = Path.home() / ".ai-sh"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
 DEFAULT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+API_KEY_ENV = "SILICONFLOW_API"
 
 
 @dataclass(frozen=True)
@@ -77,8 +78,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
     behavior_data = _section(data, "behavior")
     safety_data = _section(data, "safety")
 
-    env_api_key = os.getenv("SILICONFLOW_API")
-    api_key = env_api_key if env_api_key is not None else _str(api_data, "api_key", "")
+    api_key = _api_key_from_sources(api_data)
 
     return Config(
         api=ApiConfig(
@@ -130,7 +130,8 @@ def require_api_key(config: Config) -> str:
     if config.api.api_key:
         return config.api.api_key
     raise ConfigError(
-        "未配置 SiliconFlow API Key。请设置环境变量 SILICONFLOW_API，"
+        "未配置 SiliconFlow API Key。请 export SILICONFLOW_API，"
+        "或在当前目录/.env、~/.ai-sh/.env 中写入 SILICONFLOW_API=...，"
         "或在 ~/.ai-sh/config.toml 的 [api].api_key 中配置。"
     )
 
@@ -143,6 +144,39 @@ def _section(data: dict[str, object], key: str) -> dict[str, object]:
 def _str(data: dict[str, object], key: str, default: str) -> str:
     value = data.get(key, default)
     return value if isinstance(value, str) else default
+
+
+def _api_key_from_sources(api_data: dict[str, object]) -> str:
+    env_value = os.getenv(API_KEY_ENV)
+    if env_value and env_value.strip():
+        return env_value.strip()
+
+    dotenv_value = _read_dotenv_key(Path.cwd() / ".env") or _read_dotenv_key(
+        CONFIG_DIR / ".env"
+    )
+    if dotenv_value:
+        return dotenv_value
+
+    return _str(api_data, "api_key", "").strip()
+
+
+def _read_dotenv_key(path: Path) -> str:
+    if not path.exists():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    prefix = f"{API_KEY_ENV}="
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or not stripped.startswith(prefix):
+            continue
+        value = stripped[len(prefix) :].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        return value.strip()
+    return ""
 
 
 def _positive_int(data: dict[str, object], key: str, default: int) -> int:
