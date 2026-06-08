@@ -74,7 +74,9 @@ def ai_sh(init_config: bool, dry_run: bool) -> None:
     HISTORY_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     prompt_history = FileHistory(str(HISTORY_PATH.parent / "repl.txt"))
     session: PromptSession[str] = PromptSession(history=prompt_history)
-    console.print("[bold]ai-sh[/bold] REPL，输入 exit 或 quit 退出。")
+    console.print(
+        "[bold]ai-sh[/bold] REPL 已启动。输入自然语言请求；输入 exit 或 quit 退出。"
+    )
 
     while True:
         try:
@@ -122,7 +124,7 @@ def _run_once(
             language=config.behavior.language,
         )
         result = generate_command(config, messages)
-        render_command(result)
+        render_command(result, cwd=str(env_context.get("cwd", "")))
         if conversation:
             conversation.add_user(user_input)
             conversation.add_assistant(result_to_assistant_message(result)["content"])
@@ -162,7 +164,7 @@ def _handle_result(
 
     if dry_run:
         history.append(new_history_entry(user_input, result.command, executed=False))
-        console.print("dry-run：未执行命令。")
+        console.print("dry-run：已生成并检查命令，没有执行。")
         return
 
     caution = verdict.action == "warn" or result.risk_level == "caution"
@@ -172,11 +174,11 @@ def _handle_result(
     choice = prompt_confirm(config.behavior.default_confirm, caution=caution)
     if choice == "n":
         history.append(new_history_entry(user_input, result.command, executed=False))
-        console.print("已取消。")
+        console.print("已取消，没有执行任何命令。")
         return
     if choice == "y" and caution and not prompt_caution_confirm():
         history.append(new_history_entry(user_input, result.command, executed=False))
-        console.print("已取消。")
+        console.print("已取消，没有执行任何命令。")
         return
     if choice == "e":
         result = edit_command(result)
@@ -198,13 +200,13 @@ def _handle_result(
             history.append(
                 new_history_entry(user_input, result.command, executed=False)
             )
-            console.print("已取消。")
+            console.print("已取消，没有执行任何命令。")
             return
         if edited_verdict.action == "warn" and not prompt_caution_confirm():
             history.append(
                 new_history_entry(user_input, result.command, executed=False)
             )
-            console.print("已取消。")
+            console.print("已取消，没有执行任何命令。")
             return
 
     execution = execute_command(result.command)

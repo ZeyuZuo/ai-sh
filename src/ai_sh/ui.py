@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import replace
+from pathlib import Path
 from typing import Literal
 
 from rich.console import Console
@@ -23,7 +24,7 @@ ConfirmChoice = Literal["y", "e", "n"]
 console = Console()
 
 
-def render_command(result: CommandResult) -> None:
+def render_command(result: CommandResult, *, cwd: str | None = None) -> None:
     """Render a generated command and its metadata."""
 
     if result.clarification and not result.command:
@@ -32,6 +33,7 @@ def render_command(result: CommandResult) -> None:
         )
         return
 
+    display_cwd = cwd or str(Path.cwd())
     syntax = Syntax(result.command, "bash", word_wrap=True)
     risk_style = {
         "safe": "green",
@@ -39,17 +41,22 @@ def render_command(result: CommandResult) -> None:
         "danger": "red",
     }[result.risk_level]
 
-    table = Table.grid(padding=(0, 1))
-    table.add_column(style="bold")
-    table.add_column()
-    table.add_row("风险", f"[{risk_style}]{result.risk_level}[/{risk_style}]")
+    table = Table.grid(padding=(0, 1), expand=True)
+    table.add_column(style="bold cyan", no_wrap=True)
+    table.add_column(ratio=1)
+    table.add_row("目录", Text(display_cwd))
     table.add_row("说明", Text(result.explanation))
+    table.add_row("风险", Text(_risk_label(result.risk_level), style=risk_style))
     if result.risk_reason:
         table.add_row("原因", Text(result.risk_reason))
     if result.alternatives:
-        table.add_row("备选", Text("\n".join(result.alternatives)))
+        alternatives = "\n".join(
+            f"{index}. {command}"
+            for index, command in enumerate(result.alternatives, start=1)
+        )
+        table.add_row("备选", Text(alternatives))
 
-    console.print(Panel(syntax, title="生成的命令", border_style=risk_style))
+    console.print(Panel(syntax, title="准备执行的命令", border_style=risk_style))
     console.print(table)
 
 
@@ -81,6 +88,9 @@ def render_execution_result(result: ExecutionResult) -> None:
     if not result.stdout and not result.stderr:
         status += "\n没有输出。对于查找类命令，这通常表示没有匹配结果。"
 
+    console.print(
+        Panel(Syntax(result.command, "bash", word_wrap=True), title="已执行命令")
+    )
     console.print(Panel(Text(status), title="执行结果", border_style=style))
     if result.stdout:
         console.print(Panel(Text(result.stdout), title="stdout", border_style="blue"))
@@ -96,9 +106,8 @@ def prompt_confirm(
     suffix = "；该命令有风险，执行前还会二次确认" if caution else ""
     default_label = "执行" if default == "y" else "取消"
     prompt = (
-        "\n请选择下一步："
-        "[y] 执行  [e] 编辑命令  [n] 取消"
-        f"（直接回车：{default_label}）{suffix}\n> "
+        "\n下一步：输入 y 执行，输入 e 先编辑，输入 n 取消"
+        f"；直接回车：{default_label}{suffix}\n> "
     )
     answer = _read_answer(prompt)
     if not answer:
@@ -147,3 +156,12 @@ def _read_answer(prompt: str) -> str:
         console.print("\n未收到确认，已取消。")
         return ""
     return value.strip().lower()
+
+
+def _risk_label(risk_level: str) -> str:
+    labels = {
+        "safe": "safe（只读或低风险）",
+        "caution": "caution（需要谨慎确认）",
+        "danger": "danger（禁止执行）",
+    }
+    return labels.get(risk_level, risk_level)

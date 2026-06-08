@@ -40,7 +40,7 @@ def test_ai_dry_run_does_not_execute(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code == 0
     assert called is False
-    assert "dry-run" in result.output
+    assert "dry-run：已生成并检查命令，没有执行。" in result.output
 
 
 def test_single_run_does_not_inject_persisted_history(monkeypatch, tmp_path) -> None:
@@ -141,6 +141,7 @@ def test_ai_executes_safe_command_and_explains_empty_output(
 
     assert result.exit_code == 0
     assert "命令已成功执行" in result.output
+    assert "已执行命令" in result.output
     assert "没有输出" in result.output
 
 
