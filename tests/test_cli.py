@@ -41,6 +41,39 @@ def test_ai_dry_run_does_not_execute(monkeypatch, tmp_path) -> None:
     assert "dry-run" in result.output
 
 
+def test_single_run_does_not_inject_persisted_history(monkeypatch, tmp_path) -> None:
+    history_module = __import__("ai_sh.history").history
+    history_path = tmp_path / "history.json"
+    store = history_module.HistoryStore(history_path, limit=10)
+    store.append(history_module.new_history_entry("old", "echo old", executed=False))
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+
+    def fake_collect_context(recent_commands=None):
+        captured["recent_commands"] = recent_commands
+        return {"cwd": str(tmp_path), "recent_commands": recent_commands}
+
+    monkeypatch.setattr("ai_sh.cli.collect_context", fake_collect_context)
+    monkeypatch.setattr(
+        "ai_sh.cli.generate_command",
+        lambda config, messages: CommandResult(
+            command="printf ok",
+            explanation="prints text",
+            risk_level="safe",
+        ),
+    )
+    monkeypatch.setattr(
+        "ai_sh.cli.HistoryStore",
+        lambda limit: history_module.HistoryStore(history_path, limit=limit),
+    )
+
+    result = CliRunner().invoke(ai, ["--dry-run", "say", "hello"])
+
+    assert result.exit_code == 0
+    assert captured["recent_commands"] == []
+
+
 def test_ai_blocks_dangerous_command(monkeypatch, tmp_path) -> None:
     history_path = tmp_path / "history.json"
     monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))

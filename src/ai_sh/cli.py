@@ -23,6 +23,7 @@ from ai_sh.safety import SafetyVerdict, check_command
 from ai_sh.ui import (
     console,
     edit_command,
+    prompt_caution_confirm,
     prompt_confirm,
     render_block,
     render_command,
@@ -107,9 +108,12 @@ def _run_once(
     try:
         config = config or load_config()
         history = history or HistoryStore(limit=config.behavior.history_limit)
-        env_context = collect_context(
-            recent_commands=history.recent_commands(config.behavior.context_commands)
+        recent_commands = (
+            history.recent_commands(config.behavior.context_commands)
+            if conversation
+            else []
         )
+        env_context = collect_context(recent_commands=recent_commands)
         messages = build_messages(
             user_input,
             env_context,
@@ -170,6 +174,10 @@ def _handle_result(
         history.append(new_history_entry(user_input, result.command, executed=False))
         console.print("已取消。")
         return
+    if choice == "y" and caution and not prompt_caution_confirm():
+        history.append(new_history_entry(user_input, result.command, executed=False))
+        console.print("已取消。")
+        return
     if choice == "e":
         result = edit_command(result)
         render_command(result)
@@ -187,6 +195,12 @@ def _handle_result(
             return
         confirm_edited = prompt_confirm("n", caution=edited_verdict.action == "warn")
         if confirm_edited != "y":
+            history.append(
+                new_history_entry(user_input, result.command, executed=False)
+            )
+            console.print("已取消。")
+            return
+        if edited_verdict.action == "warn" and not prompt_caution_confirm():
             history.append(
                 new_history_entry(user_input, result.command, executed=False)
             )

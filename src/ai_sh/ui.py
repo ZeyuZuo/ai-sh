@@ -91,6 +91,13 @@ def prompt_confirm(
     return "n"
 
 
+def prompt_caution_confirm() -> bool:
+    """Ask for a second explicit confirmation for caution commands."""
+
+    answer = console.input("该命令存在风险。再次输入 y 确认执行: ").strip().lower()
+    return answer == "y"
+
+
 def edit_command(result: CommandResult) -> CommandResult:
     """Open the generated command in an editor and return the edited result."""
 

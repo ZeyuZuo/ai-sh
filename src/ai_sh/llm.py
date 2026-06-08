@@ -110,7 +110,10 @@ def generate_command(config: Config, messages: list[ChatMessage]) -> CommandResu
     except RateLimitError as exc:
         raise ApiError("AI 服务返回限流，请稍后重试。") from exc
     except APIError as exc:
-        raise ApiError(f"AI 服务调用失败：{_safe_api_message(exc)}") from exc
+        if _looks_like_json_mode_rejection(exc):
+            response = _create_without_json_mode(client, config, messages)
+        else:
+            raise ApiError(f"AI 服务调用失败：{_safe_api_message(exc)}") from exc
 
     content = response.choices[0].message.content
     if not content:
@@ -223,3 +226,8 @@ def _truncate(value: str, limit: int) -> str:
 def _safe_api_message(exc: APIError) -> str:
     message = str(exc)
     return re.sub(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[redacted]", message)
+
+
+def _looks_like_json_mode_rejection(exc: APIError) -> bool:
+    message = str(exc).lower()
+    return "response_format" in message or "json_object" in message
