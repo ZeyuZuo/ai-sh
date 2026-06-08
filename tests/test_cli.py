@@ -1,6 +1,8 @@
 from click.testing import CliRunner
 
-from ai_sh.cli import ai
+from ai_sh.cli import _run_once, ai
+from ai_sh.executor import ExecutionResult
+from ai_sh.history import Conversation, HistoryStore
 from ai_sh.llm import CommandResult
 
 
@@ -140,6 +142,74 @@ def test_ai_executes_safe_command_and_explains_empty_output(
     assert result.exit_code == 0
     assert "命令已成功执行" in result.output
     assert "没有输出" in result.output
+
+
+def test_repl_run_keeps_conversation_and_execution_summary(
+    monkeypatch, tmp_path
+) -> None:
+    history = HistoryStore(tmp_path / "history.json", limit=10)
+    conversation = Conversation(max_messages=20)
+    config = _config(tmp_path, default_confirm="y")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "ai_sh.cli.collect_context",
+        lambda recent_commands=None: {"cwd": str(tmp_path), "recent": recent_commands},
+    )
+
+    def fake_build_messages(
+        user_input,
+        env_context,
+        *,
+        stdin_context="",
+        conversation=None,
+        language="zh",
+    ):
+        captured["conversation_before"] = list(conversation or [])
+        captured["env_context"] = env_context
+        return [{"role": "user", "content": user_input}]
+
+    monkeypatch.setattr("ai_sh.cli.build_messages", fake_build_messages)
+    monkeypatch.setattr(
+        "ai_sh.cli.generate_command",
+        lambda config, messages: CommandResult(
+            command="printf done",
+            explanation="prints done",
+            risk_level="safe",
+        ),
+    )
+    monkeypatch.setattr(
+        "ai_sh.cli.execute_command",
+        lambda command: ExecutionResult(
+            command=command, exit_code=0, stdout="done", stderr=""
+        ),
+    )
+    monkeypatch.setattr("ai_sh.cli.prompt_confirm", lambda default, caution=False: "y")
+
+    _run_once(
+        "打印 done",
+        stdin_context="",
+        dry_run=False,
+        config=config,
+        history=history,
+        conversation=conversation,
+    )
+
+    assert captured["conversation_before"] == []
+    assert "done" in conversation.messages[-1]["content"]
+    assert history.load_entries()[-1].executed is True
+
+    _run_once(
+        "把刚才的结果再输出一次",
+        stdin_context="",
+        dry_run=True,
+        config=config,
+        history=history,
+        conversation=conversation,
+    )
+
+    assert captured["conversation_before"]
+    assert captured["env_context"]["recent"] == ["printf done"]
 
 
 def _config(tmp_path, default_confirm="n"):
