@@ -7,7 +7,7 @@
 第一版默认使用 SiliconFlow 的 OpenAI 兼容 API：
 
 - Base URL: `https://api.siliconflow.cn/v1`
-- Model: `deepseek-ai/DeepSeek-V4-Flash`
+- Model: `deepseek-ai/DeepSeek-V3.2`
 - API Key: 环境变量 `SILICONFLOW_API`
 
 ## Highlights
@@ -85,7 +85,7 @@ uv run ai --init-config
 ```toml
 [api]
 base_url = "https://api.siliconflow.cn/v1"
-model = "deepseek-ai/DeepSeek-V4-Flash"
+model = "deepseek-ai/DeepSeek-V3.2"
 api_key = ""
 
 [behavior]

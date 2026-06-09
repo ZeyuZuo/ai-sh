@@ -149,7 +149,7 @@ ai> 改成递归处理子目录
 ```toml
 [api]
 base_url = "https://api.siliconflow.cn/v1"   # 第一版默认 SiliconFlow OpenAI 兼容接口
-model = "deepseek-ai/DeepSeek-V4-Flash"
+model = "deepseek-ai/DeepSeek-V3.2"
 api_key = ""   # 也可通过环境变量 SILICONFLOW_API 覆盖
 
 [behavior]

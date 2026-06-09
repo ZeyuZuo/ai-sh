@@ -34,7 +34,7 @@
 默认配置：
 
 - `base_url`: `https://api.siliconflow.cn/v1`
-- `model`: `deepseek-ai/DeepSeek-V4-Flash`
+- `model`: `deepseek-ai/DeepSeek-V3.2`
 - `api_key`: 优先读取环境变量 `SILICONFLOW_API`
 
 ```python
@@ -48,7 +48,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model=config.model,  # 默认 "deepseek-ai/DeepSeek-V4-Flash"
+    model=config.model,  # 默认 "deepseek-ai/DeepSeek-V3.2"
     messages=messages,
     response_format={"type": "json_object"},  # 强制 JSON 输出
     temperature=0.2,  # 命令生成场景需要低随机性

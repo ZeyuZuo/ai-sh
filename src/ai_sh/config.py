@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover - only exercised on Python 3.10
 CONFIG_DIR = Path.home() / ".ai-sh"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
-DEFAULT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2"
 API_KEY_ENV = "SILICONFLOW_API"
 
 
