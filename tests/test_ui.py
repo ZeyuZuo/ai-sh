@@ -50,26 +50,6 @@ def test_prompt_confirm_can_select_alternative(monkeypatch, capsys) -> None:
     assert "切换到对应备选命令" in output
 
 
-def test_prompt_caution_confirm_requires_y(monkeypatch) -> None:
-    class FakeStdin:
-        def readline(self):
-            return "n\n"
-
-    monkeypatch.setattr(ui.sys, "stdin", FakeStdin())
-
-    assert ui.prompt_caution_confirm() is False
-
-
-def test_prompt_caution_confirm_accepts_y(monkeypatch) -> None:
-    class FakeStdin:
-        def readline(self):
-            return "y\n"
-
-    monkeypatch.setattr(ui.sys, "stdin", FakeStdin())
-
-    assert ui.prompt_caution_confirm() is True
-
-
 def test_render_execution_result_explains_empty_output(capsys) -> None:
     ui.render_execution_result(
         ExecutionResult(

@@ -136,7 +136,7 @@ class CommandResult:
 # safety.py
 @dataclass
 class SafetyVerdict:
-    action: Literal["allow", "warn", "block"]
+    action: Literal["allow", "block"]
     reason: str = ""
 
 # history.py

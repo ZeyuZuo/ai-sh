@@ -24,7 +24,6 @@ from ai_sh.safety import SafetyVerdict, check_command
 from ai_sh.ui import (
     console,
     edit_command,
-    prompt_caution_confirm,
     prompt_confirm,
     render_block,
     render_command,
@@ -168,9 +167,19 @@ def _handle_result(
         console.print("dry-run：已生成并检查命令，没有执行。")
         return
 
-    caution = verdict.action == "warn" or result.risk_level == "caution"
-    if caution and verdict.reason:
-        console.print(f"[yellow]注意：{verdict.reason}[/yellow]")
+    caution = result.risk_level == "caution"
+    if result.risk_level == "safe":
+        console.print("safe：自动执行只读或低风险命令。")
+        _execute_and_record(
+            user_input,
+            result,
+            history=history,
+            conversation=conversation,
+        )
+        return
+
+    if caution and result.risk_reason:
+        console.print(f"[yellow]注意：{result.risk_reason}[/yellow]")
 
     choice = prompt_confirm(
         config.behavior.default_confirm,
@@ -193,10 +202,6 @@ def _handle_result(
         history.append(new_history_entry(user_input, result.command, executed=False))
         console.print("已取消，没有执行任何命令。")
         return
-    if choice == "y" and caution and not prompt_caution_confirm():
-        history.append(new_history_entry(user_input, result.command, executed=False))
-        console.print("已取消，没有执行任何命令。")
-        return
     if choice == "e":
         result = edit_command(result)
         render_command(result)
@@ -214,7 +219,7 @@ def _handle_result(
             return
         confirm_edited = prompt_confirm(
             "n",
-            caution=edited_verdict.action == "warn",
+            caution=result.risk_level == "caution",
             alternatives_count=len(result.alternatives),
         )
         if confirm_edited != "y":
@@ -223,13 +228,22 @@ def _handle_result(
             )
             console.print("已取消，没有执行任何命令。")
             return
-        if edited_verdict.action == "warn" and not prompt_caution_confirm():
-            history.append(
-                new_history_entry(user_input, result.command, executed=False)
-            )
-            console.print("已取消，没有执行任何命令。")
-            return
 
+    _execute_and_record(
+        user_input,
+        result,
+        history=history,
+        conversation=conversation,
+    )
+
+
+def _execute_and_record(
+    user_input: str,
+    result: CommandResult,
+    *,
+    history: HistoryStore,
+    conversation: Conversation | None,
+) -> None:
     execution = execute_command(result.command)
     render_execution_result(execution)
     history.append(
@@ -251,8 +265,6 @@ def _merge_ai_risk(
         return local_verdict
     if risk_level == "danger":
         return SafetyVerdict("block", risk_reason or "AI 标记该命令为 danger。")
-    if risk_level == "caution" and local_verdict.action == "allow":
-        return SafetyVerdict("warn", risk_reason or "AI 标记该命令需要谨慎确认。")
     return local_verdict
 
 

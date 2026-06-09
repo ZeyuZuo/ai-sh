@@ -106,7 +106,7 @@ def prompt_confirm(
 ) -> ConfirmChoice:
     """Ask the user whether to execute, edit, or cancel."""
 
-    suffix = "；该命令有风险，执行前还会二次确认" if caution else ""
+    suffix = "；该命令有风险，需要确认一次" if caution else ""
     default_label = "执行" if default == "y" else "取消"
     alternative_hint = (
         f"，输入 1-{alternatives_count} 切换到对应备选命令"
@@ -131,13 +131,6 @@ def prompt_confirm(
         valid += f" 或 1-{alternatives_count}"
     console.print(f"输入无效，已取消。请输入 {valid}。")
     return "n"
-
-
-def prompt_caution_confirm() -> bool:
-    """Ask for a second explicit confirmation for caution commands."""
-
-    answer = _read_answer("该命令存在风险。再次输入 y 确认执行: ")
-    return answer == "y"
 
 
 def edit_command(result: CommandResult) -> CommandResult:

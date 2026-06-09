@@ -21,19 +21,19 @@ def test_blocks_required_hard_patterns() -> None:
         assert verdict.reason
 
 
-def test_warns_on_caution_patterns() -> None:
+def test_local_rules_do_not_guess_caution() -> None:
     commands = [
         "rm -rf ./build",
         "chmod -R 755 ./scripts",
         "chown -R user:group ./data",
         "echo hello > output.txt",
+        "find . -type f -size +100M -exec ls -lh {} \\; 2>/dev/null",
         "git push origin main --force-with-lease",
     ]
 
     for command in commands:
         verdict = check_command(command)
-        assert verdict.action == "warn", command
-        assert verdict.reason
+        assert verdict.action == "allow", command
 
 
 def test_allows_read_only_commands() -> None:
@@ -47,7 +47,7 @@ def test_allows_read_only_commands() -> None:
         assert check_command(command).action == "allow"
 
 
-def test_hard_block_can_be_disabled_but_caution_still_applies() -> None:
+def test_hard_block_can_be_disabled() -> None:
     verdict = check_command("rm -rf /", hard_block_enabled=False)
 
-    assert verdict.action == "warn"
+    assert verdict.action == "allow"

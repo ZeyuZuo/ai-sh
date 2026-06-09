@@ -12,7 +12,7 @@ from typing import Literal
 class SafetyVerdict:
     """A local safety decision for a generated command."""
 
-    action: Literal["allow", "warn", "block"]
+    action: Literal["allow", "block"]
     reason: str = ""
 
 
@@ -50,24 +50,8 @@ HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
-CAUTION_PATTERNS: list[tuple[str, str]] = [
-    # Warns on recursive deletions even outside root/home.
-    (r"\brm\s+.*(?:-[A-Za-z]*r[A-Za-z]*|--recursive)\b", "递归删除文件"),
-    # Warns on forced deletions.
-    (r"\brm\s+.*(?:-[A-Za-z]*f[A-Za-z]*|--force)\b", "强制删除文件"),
-    # Warns on recursive permission changes.
-    (r"\bchmod\s+-R\b", "递归修改权限"),
-    # Warns on recursive ownership changes.
-    (r"\bchown\s+-R\b", "递归修改所有者"),
-    # Warns on commands that overwrite files.
-    (r"(^|[^>])>\s*[^\s>]", "重定向可能覆盖文件"),
-    # Warns on force push operations.
-    (r"\bgit\s+push\b.*\s--force(?:-with-lease)?\b", "强制推送会改写远端历史"),
-]
-
-
 def check_command(command: str, *, hard_block_enabled: bool = True) -> SafetyVerdict:
-    """Check a shell command against local safety patterns."""
+    """Check a shell command against local hard-block safety patterns."""
 
     normalized = _normalize(command)
     if hard_block_enabled:
@@ -77,9 +61,6 @@ def check_command(command: str, *, hard_block_enabled: bool = True) -> SafetyVer
         for pattern, reason in HARD_BLOCK_PATTERNS:
             if re.search(pattern, normalized, flags=re.IGNORECASE | re.DOTALL):
                 return SafetyVerdict("block", reason)
-    for pattern, reason in CAUTION_PATTERNS:
-        if re.search(pattern, normalized, flags=re.IGNORECASE | re.DOTALL):
-            return SafetyVerdict("warn", reason)
     return SafetyVerdict("allow")
 
 

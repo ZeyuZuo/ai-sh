@@ -137,9 +137,10 @@ def test_ai_executes_safe_command_and_explains_empty_output(
         ),
     )
 
-    result = CliRunner().invoke(ai, ["large", "files"], input="y\n")
+    result = CliRunner().invoke(ai, ["large", "files"])
 
     assert result.exit_code == 0
+    assert "safe：自动执行只读或低风险命令。" in result.output
     assert "命令已成功执行" in result.output
     assert "已执行命令" in result.output
     assert "没有输出" in result.output
@@ -157,7 +158,8 @@ def test_ai_can_switch_to_alternative_command(monkeypatch, tmp_path) -> None:
         lambda config, messages: CommandResult(
             command="find . -type f -size +100M",
             explanation="finds large files",
-            risk_level="safe",
+            risk_level="caution",
+            risk_reason="用户需要选择备选命令。",
             alternatives=["du -sh * | sort -rh", "printf alt"],
         ),
     )
@@ -184,6 +186,43 @@ def test_ai_can_switch_to_alternative_command(monkeypatch, tmp_path) -> None:
     assert result.exit_code == 0
     assert executed["command"] == "printf alt"
     assert "已切换到备选命令 2" in result.output
+
+
+def test_ai_confirms_caution_once(monkeypatch, tmp_path) -> None:
+    history_path = tmp_path / "history.json"
+    executed: dict[str, str] = {}
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(
+        "ai_sh.cli.collect_context", lambda recent_commands=None: {"cwd": str(tmp_path)}
+    )
+    monkeypatch.setattr(
+        "ai_sh.cli.generate_command",
+        lambda config, messages: CommandResult(
+            command="rm -rf ./build",
+            explanation="removes build directory",
+            risk_level="caution",
+            risk_reason="会删除文件。",
+        ),
+    )
+    monkeypatch.setattr(
+        "ai_sh.cli.HistoryStore",
+        lambda limit: __import__("ai_sh.history").history.HistoryStore(
+            history_path, limit=limit
+        ),
+    )
+    monkeypatch.setattr("ai_sh.cli.prompt_confirm", lambda *args, **kwargs: "y")
+
+    def fake_execute(command: str) -> ExecutionResult:
+        executed["command"] = command
+        return ExecutionResult(command=command, exit_code=0, stdout="", stderr="")
+
+    monkeypatch.setattr("ai_sh.cli.execute_command", fake_execute)
+
+    result = CliRunner().invoke(ai, ["remove", "build"])
+
+    assert result.exit_code == 0
+    assert executed["command"] == "rm -rf ./build"
+    assert "注意：会删除文件。" in result.output
 
 
 def test_repl_run_keeps_conversation_and_execution_summary(
