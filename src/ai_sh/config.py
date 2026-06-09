@@ -124,16 +124,66 @@ hard_block_enabled = true
     return path
 
 
+def write_config(
+    *,
+    base_url: str,
+    model: str,
+    api_key: str,
+    path: Path = CONFIG_PATH,
+    default_confirm: Literal["y", "n"] = "n",
+    history_limit: int = 50,
+    context_commands: int = 5,
+    language: Literal["zh", "en", "auto"] = "zh",
+    hard_block_enabled: bool = True,
+) -> Path:
+    """Write a complete config file with private permissions."""
+
+    if not base_url.strip():
+        raise ConfigError("base_url 不能为空。")
+    if not model.strip():
+        raise ConfigError("model 不能为空。")
+    if not api_key.strip():
+        raise ConfigError("api_key 不能为空。")
+
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    content = f"""[api]
+base_url = "{_escape_toml_string(base_url.strip())}"
+model = "{_escape_toml_string(model.strip())}"
+api_key = "{_escape_toml_string(api_key.strip())}"
+
+[behavior]
+default_confirm = "{default_confirm}"
+history_limit = {history_limit}
+context_commands = {context_commands}
+language = "{language}"
+
+[safety]
+hard_block_enabled = {_toml_bool(hard_block_enabled)}
+"""
+    path.write_text(content, encoding="utf-8")
+    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return path
+
+
 def require_api_key(config: Config) -> str:
     """Return the configured API key or raise a user-facing error."""
 
     if config.api.api_key:
         return config.api.api_key
     raise ConfigError(
-        "未配置 SiliconFlow API Key。请 export SILICONFLOW_API，"
-        "或在当前目录/.env、~/.ai-sh/.env 中写入 SILICONFLOW_API=...，"
-        "或在 ~/.ai-sh/config.toml 的 [api].api_key 中配置。"
+        "未配置 API Key。请运行 `ai-sh config` 写入 base_url、model 和 api_key，"
+        "或 export SILICONFLOW_API。"
     )
+
+
+def validate_api_config(config: Config) -> None:
+    """Validate that base URL, model, and API key are usable."""
+
+    if not config.api.base_url.strip():
+        raise ConfigError("未配置 base_url。请运行 `ai-sh config`。")
+    if not config.api.model.strip():
+        raise ConfigError("未配置 model。请运行 `ai-sh config`。")
+    require_api_key(config)
 
 
 def _section(data: dict[str, object], key: str) -> dict[str, object]:
@@ -192,3 +242,11 @@ def _confirm_choice(value: object) -> Literal["y", "n"]:
 
 def _language(value: object) -> Literal["zh", "en", "auto"]:
     return value if value in {"zh", "en", "auto"} else "zh"
+
+
+def _escape_toml_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _toml_bool(value: bool) -> str:
+    return "true" if value else "false"

@@ -39,6 +39,21 @@ uv run ai --help
 uv run ai-sh --help
 ```
 
+首次使用前配置 API：
+
+```bash
+uv run ai-sh config
+```
+
+也可以一次性写入：
+
+```bash
+uv run ai-sh config \
+  --base-url "https://api.siliconflow.cn/v1" \
+  --model "deepseek-ai/DeepSeek-V3.2" \
+  --api-key "your-siliconflow-api-key"
+```
+
 构建包：
 
 ```bash
@@ -54,7 +69,21 @@ uv build --python 3.14
 
 ## Configure
 
-最简单的方式是设置环境变量：
+推荐用 `ai-sh config` 写入本地配置：
+
+```bash
+uv run ai-sh config
+```
+
+查看当前配置状态：
+
+```bash
+uv run ai-sh config --show
+```
+
+`--show` 不会打印 API key，只会显示是否已配置。
+
+也可以设置环境变量覆盖配置文件里的 API key：
 
 ```bash
 export SILICONFLOW_API="your-siliconflow-api-key"
@@ -68,7 +97,7 @@ export SILICONFLOW_API="your-siliconflow-api-key"
 SILICONFLOW_API="your-siliconflow-api-key"
 ```
 
-也可以生成配置文件：
+也可以生成默认配置文件：
 
 ```bash
 uv run ai --init-config
@@ -98,7 +127,7 @@ language = "zh"
 hard_block_enabled = true
 ```
 
-读取优先级是：已 export 的 `SILICONFLOW_API` 环境变量优先，其次是当前目录 `.env`、`~/.ai-sh/.env`，最后是配置文件中的 `api_key`。
+`base_url` 和 `model` 从 `~/.ai-sh/config.toml` 读取。`api_key` 的读取优先级是：已 export 的 `SILICONFLOW_API` 环境变量优先，其次是当前目录 `.env`、`~/.ai-sh/.env`，最后是配置文件中的 `api_key`。
 
 ## Usage
 

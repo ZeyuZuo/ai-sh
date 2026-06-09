@@ -37,6 +37,8 @@
 - `model`: `deepseek-ai/DeepSeek-V3.2`
 - `api_key`: 优先读取环境变量 `SILICONFLOW_API`
 
+用户应优先通过 `ai-sh config` 写入 `~/.ai-sh/config.toml`。运行时缺少 `base_url`、`model` 或 `api_key` 时必须提示用户执行 `ai-sh config`，不要静默使用不可见的硬编码配置。
+
 ```python
 import os
 

@@ -1,6 +1,6 @@
 from click.testing import CliRunner
 
-from ai_sh.cli import _run_once, ai
+from ai_sh.cli import _run_once, ai, ai_sh
 from ai_sh.executor import ExecutionResult
 from ai_sh.history import Conversation, HistoryStore
 from ai_sh.llm import CommandResult
@@ -41,6 +41,38 @@ def test_ai_dry_run_does_not_execute(monkeypatch, tmp_path) -> None:
     assert result.exit_code == 0
     assert called is False
     assert "dry-run：已生成并检查命令，没有执行。" in result.output
+
+
+def test_ai_sh_config_writes_settings(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    monkeypatch.setattr("ai_sh.cli.write_config", _write_config_to(config_path))
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+
+    result = CliRunner().invoke(
+        ai_sh,
+        [
+            "config",
+            "--base-url",
+            "https://api.example.test/v1",
+            "--model",
+            "example-model",
+            "--api-key",
+            "secret-key",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "配置已保存" in result.output
+
+
+def test_ai_sh_config_show_redacts_api_key(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+
+    result = CliRunner().invoke(ai_sh, ["config", "--show"])
+
+    assert result.exit_code == 0
+    assert "api_key: configured" in result.output
+    assert "test-key" not in result.output
 
 
 def test_single_run_does_not_inject_persisted_history(monkeypatch, tmp_path) -> None:
@@ -307,3 +339,13 @@ def _config(tmp_path, default_confirm="n"):
         safety=SafetyConfig(hard_block_enabled=True),
         path=tmp_path / "config.toml",
     )
+
+
+def _write_config_to(config_path):
+    from ai_sh.config import write_config as real_write_config
+
+    def write_to_temp(**kwargs):
+        kwargs["path"] = config_path
+        return real_write_config(**kwargs)
+
+    return write_to_temp

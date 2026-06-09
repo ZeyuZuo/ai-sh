@@ -144,7 +144,7 @@ ai> 改成递归处理子目录
 
 ### 4.6 配置
 
-通过 `~/.ai-sh/config.toml` 配置：
+通过 `ai-sh config` 写入 `~/.ai-sh/config.toml` 配置：
 
 ```toml
 [api]
@@ -163,6 +163,16 @@ hard_block_enabled = true   # 本地正则拦截开关（建议保持 true）
 ```
 
 第一版默认使用 SiliconFlow 的 OpenAI 兼容 API；后续仍保留 `base_url` 配置项，以便切换到其他 OpenAI 兼容服务。
+
+配置命令：
+
+```bash
+ai-sh config
+ai-sh config --show
+ai-sh config --base-url "https://api.siliconflow.cn/v1" --model "deepseek-ai/DeepSeek-V3.2" --api-key "..."
+```
+
+未配置 `base_url`、`model` 或 `api_key` 时，命令应提示用户运行 `ai-sh config`。
 
 ---
 

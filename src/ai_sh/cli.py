@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import sys
 from dataclasses import replace
+from getpass import getpass
 
 import click
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 
-from ai_sh.config import Config, ensure_default_config, load_config
+from ai_sh.config import (
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    Config,
+    ensure_default_config,
+    load_config,
+    validate_api_config,
+    write_config,
+)
 from ai_sh.context import collect_context
 from ai_sh.exceptions import AiShError
 from ai_sh.executor import execute_command, summarize_execution
@@ -52,19 +61,26 @@ def ai(request: tuple[str, ...], init_config: bool, dry_run: bool) -> None:
     _run_once(user_input, stdin_context=stdin_context, dry_run=dry_run)
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(
+    invoke_without_command=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+@click.pass_context
 @click.option("--init-config", is_flag=True, help="Create ~/.ai-sh/config.toml.")
 @click.option("--dry-run", is_flag=True, help="Generate and inspect without executing.")
-def ai_sh(init_config: bool, dry_run: bool) -> None:
-    """Start the ai-sh REPL."""
+def ai_sh(ctx: click.Context, init_config: bool, dry_run: bool) -> None:
+    """Start the ai-sh REPL or manage configuration."""
 
     if init_config:
         path = ensure_default_config()
         console.print(f"已创建配置文件：{path}")
         return
+    if ctx.invoked_subcommand is not None:
+        return
 
     try:
         config = load_config()
+        validate_api_config(config)
         history = HistoryStore(limit=config.behavior.history_limit)
     except AiShError as exc:
         render_error(str(exc))
@@ -98,6 +114,51 @@ def ai_sh(init_config: bool, dry_run: bool) -> None:
         )
 
 
+@ai_sh.command("config", context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--base-url", help="OpenAI-compatible API base URL.")
+@click.option("--model", help="Model name.")
+@click.option("--api-key", help="API key. If omitted, an interactive prompt is used.")
+@click.option(
+    "--show", is_flag=True, help="Show current config without revealing API key."
+)
+def configure(
+    base_url: str | None,
+    model: str | None,
+    api_key: str | None,
+    show: bool,
+) -> None:
+    """Configure API settings."""
+
+    if show:
+        _show_config()
+        return
+
+    current = load_config()
+    selected_base_url = base_url or _prompt_value(
+        "base_url", current.api.base_url or DEFAULT_BASE_URL
+    )
+    selected_model = model or _prompt_value("model", current.api.model or DEFAULT_MODEL)
+    selected_api_key = api_key or getpass("api_key（输入不会显示）: ").strip()
+
+    try:
+        path = write_config(
+            base_url=selected_base_url,
+            model=selected_model,
+            api_key=selected_api_key,
+            default_confirm=current.behavior.default_confirm,
+            history_limit=current.behavior.history_limit,
+            context_commands=current.behavior.context_commands,
+            language=current.behavior.language,
+            hard_block_enabled=current.safety.hard_block_enabled,
+        )
+    except AiShError as exc:
+        render_error(str(exc))
+        raise SystemExit(1) from exc
+
+    console.print(f"配置已保存：{path}")
+    console.print("API Key 已写入本地配置文件，文件权限已设置为 600。")
+
+
 def _run_once(
     user_input: str,
     *,
@@ -109,6 +170,7 @@ def _run_once(
 ) -> None:
     try:
         config = config or load_config()
+        validate_api_config(config)
         history = history or HistoryStore(limit=config.behavior.history_limit)
         recent_commands = (
             history.recent_commands(config.behavior.context_commands)
@@ -287,3 +349,22 @@ def _read_stdin_if_piped() -> str:
     if sys.stdin.isatty():
         return ""
     return sys.stdin.read()
+
+
+def _prompt_value(label: str, default: str) -> str:
+    value = click.prompt(label, default=default, show_default=True)
+    return str(value).strip()
+
+
+def _show_config() -> None:
+    try:
+        config = load_config()
+    except AiShError as exc:
+        render_error(str(exc))
+        raise SystemExit(1) from exc
+
+    api_key_status = "configured" if config.api.api_key else "missing"
+    console.print(f"config_path: {config.path}")
+    console.print(f"base_url: {config.api.base_url or '[missing]'}")
+    console.print(f"model: {config.api.model or '[missing]'}")
+    console.print(f"api_key: {api_key_status}")

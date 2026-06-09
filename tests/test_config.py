@@ -6,7 +6,10 @@ from ai_sh.config import (
     DEFAULT_MODEL,
     ensure_default_config,
     load_config,
+    validate_api_config,
+    write_config,
 )
+from ai_sh.exceptions import ConfigError
 
 
 def test_load_config_defaults_and_env_override(tmp_path, monkeypatch) -> None:
@@ -74,3 +77,36 @@ def test_ensure_default_config_uses_600_permissions(tmp_path) -> None:
     mode = stat.S_IMODE(os.stat(config_path).st_mode)
     assert mode == 0o600
     assert "SILICONFLOW_API" not in config_path.read_text(encoding="utf-8")
+
+
+def test_write_config_persists_api_settings_with_600_permissions(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("SILICONFLOW_API", raising=False)
+    config_path = tmp_path / ".ai-sh" / "config.toml"
+
+    write_config(
+        base_url="https://api.example.test/v1",
+        model="example-model",
+        api_key="secret-key",
+        path=config_path,
+    )
+
+    mode = stat.S_IMODE(os.stat(config_path).st_mode)
+    config = load_config(config_path)
+    assert mode == 0o600
+    assert config.api.base_url == "https://api.example.test/v1"
+    assert config.api.model == "example-model"
+    assert config.api.api_key == "secret-key"
+
+
+def test_validate_api_config_requires_api_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("SILICONFLOW_API", raising=False)
+    config = load_config(tmp_path / "missing.toml")
+
+    try:
+        validate_api_config(config)
+    except ConfigError as exc:
+        assert "ai-sh config" in str(exc)
+    else:
+        raise AssertionError("validate_api_config should require api key")
