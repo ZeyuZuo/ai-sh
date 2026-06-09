@@ -37,6 +37,19 @@ def test_prompt_confirm_describes_choices(monkeypatch, capsys) -> None:
     assert "输入 n 取消" in output
 
 
+def test_prompt_confirm_can_select_alternative(monkeypatch, capsys) -> None:
+    class FakeStdin:
+        def readline(self):
+            return "2\n"
+
+    monkeypatch.setattr(ui.sys, "stdin", FakeStdin())
+
+    assert ui.prompt_confirm(alternatives_count=2) == 2
+    output = capsys.readouterr().out
+    assert "输入 1-2" in output
+    assert "切换到对应备选命令" in output
+
+
 def test_prompt_caution_confirm_requires_y(monkeypatch) -> None:
     class FakeStdin:
         def readline(self):

@@ -145,6 +145,47 @@ def test_ai_executes_safe_command_and_explains_empty_output(
     assert "没有输出" in result.output
 
 
+def test_ai_can_switch_to_alternative_command(monkeypatch, tmp_path) -> None:
+    history_path = tmp_path / "history.json"
+    executed: dict[str, str] = {}
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(
+        "ai_sh.cli.collect_context", lambda recent_commands=None: {"cwd": str(tmp_path)}
+    )
+    monkeypatch.setattr(
+        "ai_sh.cli.generate_command",
+        lambda config, messages: CommandResult(
+            command="find . -type f -size +100M",
+            explanation="finds large files",
+            risk_level="safe",
+            alternatives=["du -sh * | sort -rh", "printf alt"],
+        ),
+    )
+    monkeypatch.setattr(
+        "ai_sh.cli.HistoryStore",
+        lambda limit: __import__("ai_sh.history").history.HistoryStore(
+            history_path, limit=limit
+        ),
+    )
+
+    def fake_execute(command: str) -> ExecutionResult:
+        executed["command"] = command
+        return ExecutionResult(command=command, exit_code=0, stdout="alt", stderr="")
+
+    monkeypatch.setattr("ai_sh.cli.execute_command", fake_execute)
+    choices = iter([2, "y"])
+    monkeypatch.setattr(
+        "ai_sh.cli.prompt_confirm",
+        lambda default, caution=False, alternatives_count=0: next(choices),
+    )
+
+    result = CliRunner().invoke(ai, ["large", "files"])
+
+    assert result.exit_code == 0
+    assert executed["command"] == "printf alt"
+    assert "已切换到备选命令 2" in result.output
+
+
 def test_repl_run_keeps_conversation_and_execution_summary(
     monkeypatch, tmp_path
 ) -> None:
@@ -185,7 +226,10 @@ def test_repl_run_keeps_conversation_and_execution_summary(
             command=command, exit_code=0, stdout="done", stderr=""
         ),
     )
-    monkeypatch.setattr("ai_sh.cli.prompt_confirm", lambda default, caution=False: "y")
+    monkeypatch.setattr(
+        "ai_sh.cli.prompt_confirm",
+        lambda default, caution=False, alternatives_count=0: "y",
+    )
 
     _run_once(
         "打印 done",

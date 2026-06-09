@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 
 import click
 from prompt_toolkit import PromptSession
@@ -171,7 +172,23 @@ def _handle_result(
     if caution and verdict.reason:
         console.print(f"[yellow]注意：{verdict.reason}[/yellow]")
 
-    choice = prompt_confirm(config.behavior.default_confirm, caution=caution)
+    choice = prompt_confirm(
+        config.behavior.default_confirm,
+        caution=caution,
+        alternatives_count=len(result.alternatives),
+    )
+    if isinstance(choice, int):
+        result = _switch_to_alternative(result, choice)
+        render_command(result)
+        _handle_result(
+            user_input,
+            result,
+            config=config,
+            history=history,
+            conversation=conversation,
+            dry_run=dry_run,
+        )
+        return
     if choice == "n":
         history.append(new_history_entry(user_input, result.command, executed=False))
         console.print("已取消，没有执行任何命令。")
@@ -195,7 +212,11 @@ def _handle_result(
                 new_history_entry(user_input, result.command, executed=False)
             )
             return
-        confirm_edited = prompt_confirm("n", caution=edited_verdict.action == "warn")
+        confirm_edited = prompt_confirm(
+            "n",
+            caution=edited_verdict.action == "warn",
+            alternatives_count=len(result.alternatives),
+        )
         if confirm_edited != "y":
             history.append(
                 new_history_entry(user_input, result.command, executed=False)
@@ -233,6 +254,21 @@ def _merge_ai_risk(
     if risk_level == "caution" and local_verdict.action == "allow":
         return SafetyVerdict("warn", risk_reason or "AI 标记该命令需要谨慎确认。")
     return local_verdict
+
+
+def _switch_to_alternative(result: CommandResult, index: int) -> CommandResult:
+    command = result.alternatives[index - 1]
+    remaining = [
+        alternative
+        for position, alternative in enumerate(result.alternatives, start=1)
+        if position != index
+    ]
+    return replace(
+        result,
+        command=command,
+        explanation=f"已切换到备选命令 {index}。请重新确认后执行。",
+        alternatives=[result.command, *remaining],
+    )
 
 
 def _read_stdin_if_piped() -> str:

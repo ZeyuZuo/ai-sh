@@ -19,7 +19,7 @@ from rich.text import Text
 from ai_sh.executor import ExecutionResult
 from ai_sh.llm import CommandResult
 
-ConfirmChoice = Literal["y", "e", "n"]
+ConfirmChoice = Literal["y", "e", "n"] | int
 
 console = Console()
 
@@ -99,22 +99,37 @@ def render_execution_result(result: ExecutionResult) -> None:
 
 
 def prompt_confirm(
-    default: Literal["y", "n"] = "n", *, caution: bool = False
+    default: Literal["y", "n"] = "n",
+    *,
+    caution: bool = False,
+    alternatives_count: int = 0,
 ) -> ConfirmChoice:
     """Ask the user whether to execute, edit, or cancel."""
 
     suffix = "；该命令有风险，执行前还会二次确认" if caution else ""
     default_label = "执行" if default == "y" else "取消"
+    alternative_hint = (
+        f"，输入 1-{alternatives_count} 切换到对应备选命令"
+        if alternatives_count
+        else ""
+    )
     prompt = (
         "\n下一步：输入 y 执行，输入 e 先编辑，输入 n 取消"
-        f"；直接回车：{default_label}{suffix}\n> "
+        f"{alternative_hint}；直接回车：{default_label}{suffix}\n> "
     )
     answer = _read_answer(prompt)
     if not answer:
         return default
     if answer in {"y", "e", "n"}:
         return answer  # type: ignore[return-value]
-    console.print("输入无效，已取消。请输入 y、e 或 n。")
+    if answer.isdigit():
+        choice = int(answer)
+        if 1 <= choice <= alternatives_count:
+            return choice
+    valid = "y、e、n"
+    if alternatives_count:
+        valid += f" 或 1-{alternatives_count}"
+    console.print(f"输入无效，已取消。请输入 {valid}。")
     return "n"
 
 
