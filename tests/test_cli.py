@@ -1,7 +1,8 @@
 import pytest
 from click.testing import CliRunner
 
-from ai_sh.cli import _run_legacy_once, ai, ai_sh
+from ai_sh.cli import _read_stdin_if_piped, _run_legacy_once, ai, ai_sh
+from ai_sh.protocol import MAX_STDIN_CONTEXT_CHARS
 from ai_sh.executor import ExecutionResult
 from ai_sh.history import Conversation, HistoryStore
 from ai_sh.llm import AssistantResult
@@ -106,6 +107,23 @@ def test_ai_sh_without_subcommand_shows_legacy_guidance() -> None:
     assert invocation.exit_code == 0
     assert "ai-sh repl" in invocation.output
     assert "REPL 已启动" not in invocation.output
+
+
+def test_piped_stdin_is_read_with_a_limit(monkeypatch) -> None:
+    class LargeStdin:
+        def isatty(self) -> bool:
+            return False
+
+        def read(self, size: int) -> str:
+            assert size == MAX_STDIN_CONTEXT_CHARS + 1
+            return "x" * size
+
+    monkeypatch.setattr("ai_sh.cli.sys.stdin", LargeStdin())
+
+    value = _read_stdin_if_piped()
+
+    assert value.startswith("x" * MAX_STDIN_CONTEXT_CHARS)
+    assert value.endswith("...[truncated]")
 
 
 def test_ai_sh_config_writes_settings(tmp_path, monkeypatch) -> None:

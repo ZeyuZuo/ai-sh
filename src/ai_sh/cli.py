@@ -18,10 +18,20 @@ from ai_sh.config import (
     validate_api_config,
     write_config,
 )
-from ai_sh.exceptions import AiShError
+from ai_sh.exceptions import AiShError, ApiError, ConfigError
 from ai_sh.executor import execute_command, summarize_execution
 from ai_sh.history import HISTORY_PATH, Conversation, HistoryStore, new_history_entry
 from ai_sh.llm import AssistantResult, result_to_assistant_message
+from ai_sh.protocol import (
+    ProtocolExitCode,
+    ProtocolInputError,
+    ProtocolResponse,
+    MAX_STDIN_CONTEXT_CHARS,
+    exit_code_for_result,
+    read_protocol_request,
+    redact_sensitive,
+    validate_protocol_fields,
+)
 from ai_sh.suggestion import create_suggestion, normalize_result
 from ai_sh.ui import (
     console,
@@ -41,7 +51,10 @@ from ai_sh.ui import (
     is_flag=True,
     help="Deprecated compatibility flag; suggestions are never executed.",
 )
-def ai(request: tuple[str, ...], init_config: bool, dry_run: bool) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Output protocol JSON.")
+def ai(
+    request: tuple[str, ...], init_config: bool, dry_run: bool, json_output: bool
+) -> None:
     """Suggest a shell command from natural language without executing it."""
 
     if init_config:
@@ -54,6 +67,13 @@ def ai(request: tuple[str, ...], init_config: bool, dry_run: bool) -> None:
         raise click.UsageError("请提供自然语言请求，例如：ai '找出超过 100MB 的文件'")
 
     stdin_context = _read_stdin_if_piped()
+    if json_output:
+        response, exit_code = _machine_suggestion_response(
+            user_input,
+            stdin_context=stdin_context,
+        )
+        _emit_protocol_response(response, exit_code)
+        return
     _run_suggestion_once(user_input, stdin_context=stdin_context)
 
 
@@ -161,6 +181,80 @@ def configure(
 
     console.print(f"配置已保存：{path}")
     console.print("API Key 已写入本地配置文件，文件权限已设置为 600。")
+
+
+@ai_sh.command("suggest", context_settings={"help_option_names": ["-h", "--help"]})
+def suggest_machine() -> None:
+    """Read a versioned request from stdin and write one JSON response."""
+
+    try:
+        protocol_request = read_protocol_request(click.get_binary_stream("stdin"))
+    except ProtocolInputError as exc:
+        _emit_protocol_response(
+            ProtocolResponse.error_response(str(exc)),
+            ProtocolExitCode.INVALID_REQUEST,
+        )
+        return
+
+    response, exit_code = _machine_suggestion_response(
+        protocol_request.request,
+        current_command=protocol_request.buffer,
+    )
+    _emit_protocol_response(response, exit_code)
+
+
+def _machine_suggestion_response(
+    request: str,
+    *,
+    current_command: str = "",
+    stdin_context: str = "",
+) -> tuple[ProtocolResponse, ProtocolExitCode]:
+    config: Config | None = None
+    try:
+        validate_protocol_fields(request, current_command)
+        config = load_config()
+        validate_api_config(config)
+        suggestion = create_suggestion(
+            config,
+            request,
+            stdin_context=stdin_context,
+            current_command=current_command,
+        )
+        return (
+            ProtocolResponse.from_result(suggestion.result),
+            exit_code_for_result(suggestion.result),
+        )
+    except ProtocolInputError as exc:
+        return (
+            ProtocolResponse.error_response(str(exc)),
+            ProtocolExitCode.INVALID_REQUEST,
+        )
+    except ConfigError as exc:
+        message = _redact_protocol_error(str(exc), config)
+        return ProtocolResponse.error_response(message), ProtocolExitCode.CONFIG_ERROR
+    except ApiError as exc:
+        message = _redact_protocol_error(str(exc), config)
+        return ProtocolResponse.error_response(message), ProtocolExitCode.API_ERROR
+    except AiShError as exc:
+        message = _redact_protocol_error(str(exc), config)
+        return ProtocolResponse.error_response(message), ProtocolExitCode.INTERNAL_ERROR
+    except KeyboardInterrupt:
+        return (
+            ProtocolResponse.error_response("请求已取消。"),
+            ProtocolExitCode.INTERRUPTED,
+        )
+    except Exception:
+        return (
+            ProtocolResponse.error_response("ai-sh 内部错误。"),
+            ProtocolExitCode.INTERNAL_ERROR,
+        )
+
+
+def _emit_protocol_response(
+    response: ProtocolResponse, exit_code: ProtocolExitCode
+) -> None:
+    click.echo(response.to_json())
+    raise SystemExit(int(exit_code))
 
 
 def _run_suggestion_once(
@@ -323,7 +417,10 @@ def _execute_and_record(
 def _read_stdin_if_piped() -> str:
     if sys.stdin.isatty():
         return ""
-    return sys.stdin.read()
+    value = sys.stdin.read(MAX_STDIN_CONTEXT_CHARS + 1)
+    if len(value) <= MAX_STDIN_CONTEXT_CHARS:
+        return value
+    return value[:MAX_STDIN_CONTEXT_CHARS] + "\n...[truncated]"
 
 
 def _prompt_value(label: str, default: str) -> str:
@@ -343,3 +440,8 @@ def _show_config() -> None:
     console.print(f"base_url: {config.api.base_url or '[missing]'}")
     console.print(f"model: {config.api.model or '[missing]'}")
     console.print(f"api_key: {api_key_status}")
+
+
+def _redact_protocol_error(message: str, config: Config | None) -> str:
+    secrets = (config.api.api_key,) if config else ()
+    return redact_sensitive(message, secrets=secrets)

@@ -129,7 +129,10 @@ def generate_command(config: Config, messages: list[ChatMessage]) -> AssistantRe
         else:
             raise ApiError(f"AI 服务调用失败：{_safe_api_message(exc)}") from exc
 
-    content = response.choices[0].message.content
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError, TypeError) as exc:
+        raise ApiError("AI 服务返回了无法识别的响应结构。") from exc
     if not content:
         raise ApiError("AI 服务返回了空响应。")
     return parse_command_result(content)

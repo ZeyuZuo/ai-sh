@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-`ai-sh` 是一个 Python 命令行工具，让用户用自然语言描述意图、AI 翻译成 shell 命令、确认后执行。详细需求见 `PRD.md`。
+`ai-sh` 是一个 Python 命令行工具，让用户用自然语言描述意图，由 AI 生成经过本地安全检查的 shell 命令建议。详细需求见 `PRD.md` 和 v0.2 方案文档。
 
 > **v0.2 开发方向（2026-07-11）：** 项目已决定改为 Shell 原生的命令输入助手。AI 只把建议命令写入当前 Shell 的输入缓冲区，永不自动执行；独立 REPL 降级为 legacy 功能；管道问答与命令生成分离。目标交互、技术边界、迁移策略和实施顺序见 [`docs/SHELL_NATIVE_PLAN.md`](docs/SHELL_NATIVE_PLAN.md)。进行 v0.2 开发时，该文档优先于本文和 `docs/PRD.md` 中描述 v0.1 产品形态的内容。
 
@@ -86,8 +86,10 @@ ai-sh/
 │       ├── config.py       # 配置读写，Config dataclass
 │       ├── context.py      # 环境上下文收集
 │       ├── llm.py          # OpenAI SDK 封装，prompt 管理
+│       ├── suggestion.py   # 建议生成编排和最终安全归一化
+│       ├── protocol.py     # 版本化 stdin/stdout 机器协议
 │       ├── safety.py       # 本地危险命令检测
-│       ├── executor.py     # subprocess 执行，输出捕获
+│       ├── executor.py     # legacy REPL 的 subprocess 执行
 │       ├── history.py      # 对话历史 + 命令历史持久化
 │       └── ui.py           # rich 渲染，交互提示
 ├── tests/
@@ -113,9 +115,11 @@ ai-sh/
 - `cli.py`：解析参数，调用其他模块，不包含业务逻辑
 - `config.py`：配置的读取和默认值，不做任何 I/O 之外的事
 - `context.py`：收集环境信息，返回 dict，不调用 AI
-- `llm.py`：封装 AI 调用，输入 messages，输出 `CommandResult`，不知道终端 UI
+- `llm.py`：封装 AI 调用，输入 messages，输出 `AssistantResult`，不知道终端 UI
+- `suggestion.py`：编排上下文、LLM 和安全检查，输出最终可展示或可插入结果
+- `protocol.py`：校验机器请求，序列化稳定响应，不调用 AI 或终端 UI
 - `safety.py`：纯函数，输入命令字符串，输出判断结果，无副作用
-- `executor.py`：执行命令，捕获输出，不做安全判断
+- `executor.py`：仅为 legacy REPL 执行命令并捕获输出，不做安全判断
 - `history.py`：读写历史文件，不知道命令是否危险
 - `ui.py`：只做渲染和用户输入，不调用 AI，不执行命令
 
@@ -130,12 +134,15 @@ ai-sh/
 ```python
 # llm.py
 @dataclass
-class CommandResult:
-    command: str
-    explanation: str
-    risk_level: Literal["safe", "caution", "danger"]
+class AssistantResult:
+    kind: Literal["command", "answer", "clarification", "blocked", "error"]
+    command: str = ""
+    answer: str = ""
+    explanation: str = ""
+    risk_level: Literal["safe", "caution", "danger"] = "caution"
     risk_reason: str = ""
-    alternatives: list[str] = field(default_factory=list)
+    clarification: str = ""
+    error: str = ""
 
 # safety.py
 @dataclass

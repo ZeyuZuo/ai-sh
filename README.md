@@ -1,8 +1,8 @@
 # ai-sh
 
-把自然语言变成可确认、可解释、可拦截的 shell 命令。
+把自然语言变成可检查、可解释、可拦截的 shell 命令建议。
 
-`ai-sh` 是一个面向开发者和运维人员的命令行助手。你描述想做什么，它会结合当前目录、shell、操作系统和常用工具生成一条 shell 命令，解释它的作用并标记风险。只读或低风险命令默认自动执行；有风险的命令会先确认；危险命令会被拒绝。
+`ai-sh` 是一个面向开发者和运维人员的命令行助手。你描述想做什么，它会结合当前目录、shell、操作系统和常用工具生成一条 shell 命令，解释它的作用并标记风险。默认 `ai` 只展示建议，永不执行；危险命令会在展示前被本地安全层拦截。
 
 第一版默认使用 SiliconFlow 的 OpenAI 兼容 API：
 
@@ -13,12 +13,12 @@
 ## Highlights
 
 - 自然语言生成 shell 命令
-- 单次模式和 REPL 连续对话
-- 支持 `stdin` 上下文，例如 `git diff | ai "总结这次改动"`
+- 单次建议模式和显式 legacy REPL
+- `ai --json` 和 `ai-sh suggest` 稳定机器接口
 - 自动收集 cwd、shell、OS、用户名和 PATH 中的关键工具
-- 每条命令都有解释、风险等级和可选替代方案
+- 每条命令都有解释和风险等级
 - 本地硬拦截危险命令，不依赖模型自觉
-- `safe` 命令默认自动执行，`caution` 命令确认一次，`danger` 命令直接拒绝
+- `safe` 和 `caution` 只展示，`danger` 直接拒绝，默认路径不执行任何命令
 - 历史记录本地持久化，权限为 `600`
 - 使用 `uv` 管理依赖、测试和构建
 
@@ -131,25 +131,26 @@ hard_block_enabled = true
 
 ## Usage
 
-单次生成命令：
+单次生成命令建议：
 
 ```bash
 uv run ai "找出当前目录下超过 100MB 的文件"
 ```
 
-如果输出里有备选命令，可以在确认提示处输入对应编号切换到备选命令，例如输入 `1` 使用第一个备选；切换后会重新展示命令并再次确认。
+该命令会展示建议、解释和风险，不会执行建议命令。
 
-从管道读取上下文：
+获取相同结构的 JSON 输出：
 
 ```bash
-git diff | uv run ai "帮我总结这次改动"
-cat error.log | uv run ai "这个报错是什么意思，怎么修"
+uv run ai --json "找出当前目录下超过 100MB 的文件"
 ```
 
-进入 REPL：
+Shell Widget 使用的版本化 stdin/stdout 协议由 `ai-sh suggest` 提供，格式、限制和退出码见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md#7-后端结果协议)。
+
+旧版 REPL 暂时保留为显式 legacy 命令：
 
 ```bash
-uv run ai-sh
+uv run ai-sh repl
 ```
 
 REPL 示例：
@@ -160,11 +161,7 @@ ai> 把刚才的结果只保留 src/ 目录下的
 ai> 用 wc -l 统计一下行数
 ```
 
-只生成和检查，不执行：
-
-```bash
-uv run ai --dry-run "删除 build 目录"
-```
+`--dry-run` 仅作为兼容参数保留；默认 `ai` 已经始终是 dry-run 语义。
 
 ## Safety Model
 
@@ -172,9 +169,9 @@ uv run ai --dry-run "删除 build 目录"
 
 1. 模型必须返回 JSON，其中包含 `risk_level`: `safe`、`caution` 或 `danger`。
 2. 本地正则和参数解析只硬拦截灾难级危险命令。
-3. `danger` 命令直接拒绝，不进入确认流程。
-4. `caution` 命令需要用户明确确认一次。
-5. `safe` 且未命中硬拦截的命令默认自动执行；使用 `--dry-run` 可只查看不执行。
+3. `danger` 和命中本地硬拦截的命令直接拒绝。
+4. `safe` 和 `caution` 命令只展示建议与风险，不进入执行流程。
+5. 只有显式调用的 legacy REPL 暂时保留旧执行能力。
 
 本地硬拦截覆盖这些高风险模式：
 
@@ -230,10 +227,12 @@ src/ai_sh/
   config.py     # 配置读取和默认值
   context.py    # 环境上下文收集
   llm.py        # SiliconFlow/OpenAI 兼容调用和 JSON 解析
+  suggestion.py # 建议生成编排和最终安全归一化
+  protocol.py   # Shell Widget 使用的版本化机器协议
   safety.py     # 本地危险命令检测
-  executor.py   # subprocess 执行和输出捕获
-  history.py    # 历史持久化和 REPL 上下文
-  ui.py         # rich 渲染和确认交互
+  executor.py   # legacy REPL 的 subprocess 执行
+  history.py    # 建议历史和 legacy REPL 上下文
+  ui.py         # Rich 人类可读结果渲染
 ```
 
 ## Privacy
@@ -245,6 +244,6 @@ src/ai_sh/
 
 ## Status
 
-当前版本是 `0.1.0`。目标是先把自然语言到命令的核心工作流做稳：生成、解释、安全拦截、确认执行和 REPL 连续追问。
+包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口。legacy REPL 只用于迁移兼容。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。目标逻辑和分阶段开发计划见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。

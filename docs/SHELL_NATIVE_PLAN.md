@@ -264,6 +264,24 @@ bash 和 zsh MVP 稳定后的兼容阶段支持 fish：
 
 模型层和 Shell Widget 不直接共享厂商响应。Python 后端将结果规范化为版本化协议：
 
+Widget 调用 `ai-sh suggest` 时，通过 stdin 发送一个 UTF-8 JSON 对象：
+
+```json
+{
+  "protocol_version": 1,
+  "request": "按修改时间倒序排列",
+  "buffer": "find src -type f -name '*.py' -mtime -1"
+}
+```
+
+协议输入限制：
+
+- stdin JSON 总量不超过 128 KiB。
+- `request` 必须是非空字符串，不超过 4096 字符。
+- `buffer` 必须是字符串，不超过 32768 字符。
+- `ai --json` 使用相同的 request 限制；其管道上下文最多读取 65536 字符并明确标记截断。
+- 未知字段由当前协议版本忽略，便于向后兼容增加可选字段。
+
 ```json
 {
   "protocol_version": 1,
@@ -294,6 +312,19 @@ bash 和 zsh MVP 稳定后的兼容阶段支持 fish：
 - `command` 必须经过本地安全层后才能标记为可插入。
 - Widget 不使用 `eval` 解释 JSON 中的命令。
 - v0.2 不再提供 `alternatives`；用户通过修改模式获得新命令。
+
+稳定退出码：
+
+| 退出码 | 含义 |
+|---:|---|
+| `0` | 成功返回 command 或 answer |
+| `2` | 请求 JSON、版本、类型或长度无效 |
+| `20` | API 配置无效或缺失 |
+| `21` | AI API 连接、限流、响应或解析失败 |
+| `30` | 需要用户澄清 |
+| `31` | AI danger 或本地安全规则拦截 |
+| `70` | 未分类的内部错误 |
+| `130` | 用户中断请求 |
 
 ---
 
