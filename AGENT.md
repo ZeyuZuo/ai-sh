@@ -8,6 +8,8 @@
 
 `ai-sh` 是一个 Python 命令行工具，让用户用自然语言描述意图、AI 翻译成 shell 命令、确认后执行。详细需求见 `PRD.md`。
 
+> **v0.2 开发方向（2026-07-11）：** 项目已决定改为 Shell 原生的命令输入助手。AI 只把建议命令写入当前 Shell 的输入缓冲区，永不自动执行；独立 REPL 降级为 legacy 功能；管道问答与命令生成分离。目标交互、技术边界、迁移策略和实施顺序见 [`docs/SHELL_NATIVE_PLAN.md`](docs/SHELL_NATIVE_PLAN.md)。进行 v0.2 开发时，该文档优先于本文和 `docs/PRD.md` 中描述 v0.1 产品形态的内容。
+
 ---
 
 ## 技术栈
