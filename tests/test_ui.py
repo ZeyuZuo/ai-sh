@@ -1,6 +1,6 @@
 from ai_sh import ui
 from ai_sh.executor import ExecutionResult
-from ai_sh.llm import CommandResult
+from ai_sh.llm import AssistantResult
 
 
 def test_prompt_confirm_cancel_on_eof(monkeypatch) -> None:
@@ -37,19 +37,6 @@ def test_prompt_confirm_describes_choices(monkeypatch, capsys) -> None:
     assert "输入 n 取消" in output
 
 
-def test_prompt_confirm_can_select_alternative(monkeypatch, capsys) -> None:
-    class FakeStdin:
-        def readline(self):
-            return "2\n"
-
-    monkeypatch.setattr(ui.sys, "stdin", FakeStdin())
-
-    assert ui.prompt_confirm(alternatives_count=2) == 2
-    output = capsys.readouterr().out
-    assert "输入 1-2" in output
-    assert "切换到对应备选命令" in output
-
-
 def test_render_execution_result_explains_empty_output(capsys) -> None:
     ui.render_execution_result(
         ExecutionResult(
@@ -65,17 +52,24 @@ def test_render_execution_result_explains_empty_output(capsys) -> None:
 
 def test_render_command_shows_plan_context(capsys) -> None:
     ui.render_command(
-        CommandResult(
+        AssistantResult(
             command="find . -type f -size +100M",
             explanation="查找大文件",
             risk_level="safe",
-            alternatives=["du -sh * | sort -rh"],
         ),
         cwd="/tmp/project",
     )
 
     output = capsys.readouterr().out
-    assert "准备执行的命令" in output
+    assert "建议命令（未执行）" in output
     assert "/tmp/project" in output
     assert "safe（只读或低风险）" in output
-    assert "1. du -sh * | sort -rh" in output
+
+
+def test_render_result_shows_block(capsys) -> None:
+    ui.render_result(
+        AssistantResult(kind="blocked", risk_level="danger", risk_reason="删除根目录")
+    )
+
+    output = capsys.readouterr().out
+    assert "已拦截危险命令" in output

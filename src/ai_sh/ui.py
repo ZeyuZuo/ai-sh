@@ -17,21 +17,35 @@ from rich.table import Table
 from rich.text import Text
 
 from ai_sh.executor import ExecutionResult
-from ai_sh.llm import CommandResult
+from ai_sh.llm import AssistantResult
 
-ConfirmChoice = Literal["y", "e", "n"] | int
+ConfirmChoice = Literal["y", "e", "n"]
 
 console = Console()
 
 
-def render_command(result: CommandResult, *, cwd: str | None = None) -> None:
-    """Render a generated command and its metadata."""
+def render_result(result: AssistantResult, *, cwd: str | None = None) -> None:
+    """Render any normalized assistant result."""
 
-    if result.clarification and not result.command:
+    if result.kind == "clarification":
         console.print(
             Panel(Text(result.clarification), title="需要澄清", border_style="yellow")
         )
         return
+    if result.kind == "answer":
+        console.print(Panel(Text(result.answer), title="回答", border_style="blue"))
+        return
+    if result.kind == "blocked":
+        render_block(result.risk_reason)
+        return
+    if result.kind == "error":
+        render_error(result.error)
+        return
+    render_command(result, cwd=cwd)
+
+
+def render_command(result: AssistantResult, *, cwd: str | None = None) -> None:
+    """Render a generated command and its metadata."""
 
     display_cwd = cwd or str(Path.cwd())
     syntax = Syntax(result.command, "bash", word_wrap=True)
@@ -49,14 +63,7 @@ def render_command(result: CommandResult, *, cwd: str | None = None) -> None:
     table.add_row("风险", Text(_risk_label(result.risk_level), style=risk_style))
     if result.risk_reason:
         table.add_row("原因", Text(result.risk_reason))
-    if result.alternatives:
-        alternatives = "\n".join(
-            f"{index}. {command}"
-            for index, command in enumerate(result.alternatives, start=1)
-        )
-        table.add_row("备选", Text(alternatives))
-
-    console.print(Panel(syntax, title="准备执行的命令", border_style=risk_style))
+    console.print(Panel(syntax, title="建议命令（未执行）", border_style=risk_style))
     console.print(table)
 
 
@@ -102,38 +109,25 @@ def prompt_confirm(
     default: Literal["y", "n"] = "n",
     *,
     caution: bool = False,
-    alternatives_count: int = 0,
 ) -> ConfirmChoice:
     """Ask the user whether to execute, edit, or cancel."""
 
     suffix = "；该命令有风险，需要确认一次" if caution else ""
     default_label = "执行" if default == "y" else "取消"
-    alternative_hint = (
-        f"，输入 1-{alternatives_count} 切换到对应备选命令"
-        if alternatives_count
-        else ""
-    )
     prompt = (
         "\n下一步：输入 y 执行，输入 e 先编辑，输入 n 取消"
-        f"{alternative_hint}；直接回车：{default_label}{suffix}\n> "
+        f"；直接回车：{default_label}{suffix}\n> "
     )
     answer = _read_answer(prompt)
     if not answer:
         return default
     if answer in {"y", "e", "n"}:
         return answer  # type: ignore[return-value]
-    if answer.isdigit():
-        choice = int(answer)
-        if 1 <= choice <= alternatives_count:
-            return choice
-    valid = "y、e、n"
-    if alternatives_count:
-        valid += f" 或 1-{alternatives_count}"
-    console.print(f"输入无效，已取消。请输入 {valid}。")
+    console.print("输入无效，已取消。请输入 y、e、n。")
     return "n"
 
 
-def edit_command(result: CommandResult) -> CommandResult:
+def edit_command(result: AssistantResult) -> AssistantResult:
     """Open the generated command in an editor and return the edited result."""
 
     editor = os.getenv("EDITOR", "vi")

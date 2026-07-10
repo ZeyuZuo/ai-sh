@@ -37,8 +37,8 @@ def execute_command(command: str, *, timeout: int = 30) -> ExecutionResult:
         return ExecutionResult(
             command=command,
             exit_code=124,
-            stdout=exc.stdout or "",
-            stderr=exc.stderr or f"命令执行超过 {timeout} 秒，已终止。",
+            stdout=_timeout_text(exc.stdout),
+            stderr=_timeout_text(exc.stderr) or f"命令执行超过 {timeout} 秒，已终止。",
             timed_out=True,
         )
     except OSError as exc:
@@ -69,3 +69,9 @@ def _truncate(value: str, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[:limit] + "\n...[truncated]"
+
+
+def _timeout_text(value: str | bytes | None) -> str:
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value or ""

@@ -16,6 +16,14 @@ def test_execute_command_timeout_is_bounded() -> None:
     assert result.exit_code == 124
 
 
+def test_execute_command_timeout_decodes_partial_output() -> None:
+    result = execute_command("printf hello; sleep 2", timeout=1)
+
+    assert result.timed_out is True
+    assert result.stdout == "hello"
+    assert isinstance(result.stdout, str)
+
+
 def test_summarize_execution_truncates_output() -> None:
     result = execute_command("printf 1234567890")
 

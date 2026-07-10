@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 from getpass import getpass
 
 import click
@@ -19,34 +18,31 @@ from ai_sh.config import (
     validate_api_config,
     write_config,
 )
-from ai_sh.context import collect_context
 from ai_sh.exceptions import AiShError
 from ai_sh.executor import execute_command, summarize_execution
 from ai_sh.history import HISTORY_PATH, Conversation, HistoryStore, new_history_entry
-from ai_sh.llm import (
-    CommandResult,
-    build_messages,
-    generate_command,
-    result_to_assistant_message,
-)
-from ai_sh.safety import SafetyVerdict, check_command
+from ai_sh.llm import AssistantResult, result_to_assistant_message
+from ai_sh.suggestion import create_suggestion, normalize_result
 from ai_sh.ui import (
     console,
     edit_command,
     prompt_confirm,
-    render_block,
-    render_command,
     render_error,
     render_execution_result,
+    render_result,
 )
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("request", nargs=-1)
 @click.option("--init-config", is_flag=True, help="Create ~/.ai-sh/config.toml.")
-@click.option("--dry-run", is_flag=True, help="Generate and inspect without executing.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Deprecated compatibility flag; suggestions are never executed.",
+)
 def ai(request: tuple[str, ...], init_config: bool, dry_run: bool) -> None:
-    """Generate a shell command from natural language."""
+    """Suggest a shell command from natural language without executing it."""
 
     if init_config:
         path = ensure_default_config()
@@ -58,7 +54,7 @@ def ai(request: tuple[str, ...], init_config: bool, dry_run: bool) -> None:
         raise click.UsageError("请提供自然语言请求，例如：ai '找出超过 100MB 的文件'")
 
     stdin_context = _read_stdin_if_piped()
-    _run_once(user_input, stdin_context=stdin_context, dry_run=dry_run)
+    _run_suggestion_once(user_input, stdin_context=stdin_context)
 
 
 @click.group(
@@ -67,9 +63,8 @@ def ai(request: tuple[str, ...], init_config: bool, dry_run: bool) -> None:
 )
 @click.pass_context
 @click.option("--init-config", is_flag=True, help="Create ~/.ai-sh/config.toml.")
-@click.option("--dry-run", is_flag=True, help="Generate and inspect without executing.")
-def ai_sh(ctx: click.Context, init_config: bool, dry_run: bool) -> None:
-    """Start the ai-sh REPL or manage configuration."""
+def ai_sh(ctx: click.Context, init_config: bool) -> None:
+    """Manage ai-sh configuration and shell integration."""
 
     if init_config:
         path = ensure_default_config()
@@ -77,6 +72,15 @@ def ai_sh(ctx: click.Context, init_config: bool, dry_run: bool) -> None:
         return
     if ctx.invoked_subcommand is not None:
         return
+
+    console.print(ctx.get_help())
+    console.print("\n运行 `ai-sh repl` 可临时使用旧版 REPL。")
+
+
+@ai_sh.command("repl", context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--dry-run", is_flag=True, help="Generate and inspect without executing.")
+def repl(dry_run: bool) -> None:
+    """Start the legacy command-executing REPL."""
 
     try:
         config = load_config()
@@ -104,7 +108,7 @@ def ai_sh(ctx: click.Context, init_config: bool, dry_run: bool) -> None:
             continue
         if user_input in {"exit", "quit"}:
             return
-        _run_once(
+        _run_legacy_once(
             user_input,
             stdin_context="",
             dry_run=dry_run,
@@ -159,7 +163,35 @@ def configure(
     console.print("API Key 已写入本地配置文件，文件权限已设置为 600。")
 
 
-def _run_once(
+def _run_suggestion_once(
+    user_input: str,
+    *,
+    stdin_context: str,
+    config: Config | None = None,
+    history: HistoryStore | None = None,
+) -> None:
+    try:
+        config = config or load_config()
+        validate_api_config(config)
+        history = history or HistoryStore(limit=config.behavior.history_limit)
+        suggestion = create_suggestion(
+            config,
+            user_input,
+            stdin_context=stdin_context,
+        )
+        result = suggestion.result
+        render_result(result, cwd=str(suggestion.environment.get("cwd", "")))
+        if result.kind == "command":
+            history.append(
+                new_history_entry(user_input, result.command, executed=False)
+            )
+    except AiShError as exc:
+        render_error(str(exc))
+    except KeyboardInterrupt:
+        console.print("\n已取消。")
+
+
+def _run_legacy_once(
     user_input: str,
     *,
     stdin_context: str,
@@ -177,22 +209,24 @@ def _run_once(
             if conversation
             else []
         )
-        env_context = collect_context(recent_commands=recent_commands)
-        messages = build_messages(
+        suggestion = create_suggestion(
+            config,
             user_input,
-            env_context,
             stdin_context=stdin_context,
-            conversation=conversation.messages if conversation else None,
-            language=config.behavior.language,
+            conversation=conversation,
+            recent_commands=recent_commands,
         )
-        result = generate_command(config, messages)
-        render_command(result, cwd=str(env_context.get("cwd", "")))
+        result = suggestion.result
+        render_result(result, cwd=str(suggestion.environment.get("cwd", "")))
         if conversation:
             conversation.add_user(user_input)
             conversation.add_assistant(result_to_assistant_message(result)["content"])
-        if not result.command:
+        if result.kind == "blocked":
+            history.append(new_history_entry(user_input, "", executed=False))
             return
-        _handle_result(
+        if result.kind != "command":
+            return
+        _handle_legacy_result(
             user_input,
             result,
             config=config,
@@ -206,24 +240,15 @@ def _run_once(
         console.print("\n已取消。")
 
 
-def _handle_result(
+def _handle_legacy_result(
     user_input: str,
-    result: CommandResult,
+    result: AssistantResult,
     *,
     config: Config,
     history: HistoryStore,
     conversation: Conversation | None,
     dry_run: bool,
 ) -> None:
-    verdict = check_command(
-        result.command, hard_block_enabled=config.safety.hard_block_enabled
-    )
-    verdict = _merge_ai_risk(result.risk_level, result.risk_reason, verdict)
-    if verdict.action == "block":
-        render_block(verdict.reason)
-        history.append(new_history_entry(user_input, result.command, executed=False))
-        return
-
     if dry_run:
         history.append(new_history_entry(user_input, result.command, executed=False))
         console.print("dry-run：已生成并检查命令，没有执行。")
@@ -243,46 +268,21 @@ def _handle_result(
     if caution and result.risk_reason:
         console.print(f"[yellow]注意：{result.risk_reason}[/yellow]")
 
-    choice = prompt_confirm(
-        config.behavior.default_confirm,
-        caution=caution,
-        alternatives_count=len(result.alternatives),
-    )
-    if isinstance(choice, int):
-        result = _switch_to_alternative(result, choice)
-        render_command(result)
-        _handle_result(
-            user_input,
-            result,
-            config=config,
-            history=history,
-            conversation=conversation,
-            dry_run=dry_run,
-        )
-        return
+    choice = prompt_confirm(config.behavior.default_confirm, caution=caution)
     if choice == "n":
         history.append(new_history_entry(user_input, result.command, executed=False))
         console.print("已取消，没有执行任何命令。")
         return
     if choice == "e":
         result = edit_command(result)
-        render_command(result)
-        edited_verdict = check_command(
-            result.command, hard_block_enabled=config.safety.hard_block_enabled
-        )
-        edited_verdict = _merge_ai_risk(
-            result.risk_level, result.risk_reason, edited_verdict
-        )
-        if edited_verdict.action == "block":
-            render_block(edited_verdict.reason)
-            history.append(
-                new_history_entry(user_input, result.command, executed=False)
-            )
+        result = normalize_result(result)
+        render_result(result)
+        if result.kind == "blocked":
+            history.append(new_history_entry(user_input, "", executed=False))
             return
         confirm_edited = prompt_confirm(
             "n",
             caution=result.risk_level == "caution",
-            alternatives_count=len(result.alternatives),
         )
         if confirm_edited != "y":
             history.append(
@@ -301,7 +301,7 @@ def _handle_result(
 
 def _execute_and_record(
     user_input: str,
-    result: CommandResult,
+    result: AssistantResult,
     *,
     history: HistoryStore,
     conversation: Conversation | None,
@@ -318,31 +318,6 @@ def _execute_and_record(
     )
     if conversation:
         conversation.add_execution_summary(summarize_execution(execution))
-
-
-def _merge_ai_risk(
-    risk_level: str, risk_reason: str, local_verdict: SafetyVerdict
-) -> SafetyVerdict:
-    if local_verdict.action == "block":
-        return local_verdict
-    if risk_level == "danger":
-        return SafetyVerdict("block", risk_reason or "AI 标记该命令为 danger。")
-    return local_verdict
-
-
-def _switch_to_alternative(result: CommandResult, index: int) -> CommandResult:
-    command = result.alternatives[index - 1]
-    remaining = [
-        alternative
-        for position, alternative in enumerate(result.alternatives, start=1)
-        if position != index
-    ]
-    return replace(
-        result,
-        command=command,
-        explanation=f"已切换到备选命令 {index}。请重新确认后执行。",
-        alternatives=[result.command, *remaining],
-    )
 
 
 def _read_stdin_if_piped() -> str:

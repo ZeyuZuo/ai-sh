@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
 from openai import APIConnectionError, APIError, APITimeoutError, OpenAI, RateLimitError
@@ -13,6 +13,7 @@ from ai_sh.config import Config, require_api_key
 from ai_sh.exceptions import ApiError
 
 RiskLevel = Literal["safe", "caution", "danger"]
+ResultKind = Literal["command", "answer", "clarification", "blocked", "error"]
 
 
 class ChatMessage(TypedDict):
@@ -23,15 +24,17 @@ class ChatMessage(TypedDict):
 
 
 @dataclass(frozen=True)
-class CommandResult:
-    """A generated shell command and its safety metadata."""
+class AssistantResult:
+    """A normalized command, answer, clarification, block, or error result."""
 
-    command: str
-    explanation: str
-    risk_level: RiskLevel
+    kind: ResultKind = "command"
+    command: str = ""
+    answer: str = ""
+    explanation: str = ""
+    risk_level: RiskLevel = "caution"
     risk_reason: str = ""
-    alternatives: list[str] = field(default_factory=list)
     clarification: str = ""
+    error: str = ""
 
 
 SYSTEM_PROMPT = """你是 ai-sh，一个谨慎的命令行助手。
@@ -40,15 +43,18 @@ SYSTEM_PROMPT = """你是 ai-sh，一个谨慎的命令行助手。
 必须只返回 JSON，不要返回 Markdown，不要使用代码块。
 JSON schema:
 {
+  "kind": "command | clarification",
   "command": "string，若需要澄清则为空字符串",
+  "answer": "string，命令生成模式下始终为空",
   "explanation": "string，解释命令做什么",
   "risk_level": "safe | caution | danger",
   "risk_reason": "string，risk_level 为 caution 或 danger 时必须说明原因",
-  "alternatives": ["string"],
-  "clarification": "string，只有意图模糊需要追问时填写"
+  "clarification": "string，只有意图模糊需要追问时填写",
+  "error": "string，始终为空"
 }
 
 规则：
+- 生成命令时 kind 为 command；需要追问时 kind 为 clarification。
 - 当用户意图不清楚、缺少必要路径或范围时，填写 clarification，并让 command 为空。
 - 只生成一条命令，不生成多步骤脚本。
 - 不要编造当前环境中不存在的工具。
@@ -63,6 +69,7 @@ def build_messages(
     env_context: dict[str, object],
     *,
     stdin_context: str = "",
+    current_command: str = "",
     conversation: list[ChatMessage] | None = None,
     language: str = "zh",
 ) -> list[ChatMessage]:
@@ -81,6 +88,13 @@ def build_messages(
                 _truncate(stdin_context, 8000),
             ]
         )
+    if current_command:
+        user_parts.extend(
+            [
+                "当前 Shell 输入缓冲区中的命令，用户希望基于它修改:",
+                _truncate(current_command, 8000),
+            ]
+        )
     user_parts.extend(["用户意图:", user_input])
 
     messages: list[ChatMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -90,7 +104,7 @@ def build_messages(
     return messages
 
 
-def generate_command(config: Config, messages: list[ChatMessage]) -> CommandResult:
+def generate_command(config: Config, messages: list[ChatMessage]) -> AssistantResult:
     """Call the configured OpenAI-compatible API and parse a command result."""
 
     api_key = require_api_key(config)
@@ -121,47 +135,59 @@ def generate_command(config: Config, messages: list[ChatMessage]) -> CommandResu
     return parse_command_result(content)
 
 
-def parse_command_result(content: str) -> CommandResult:
-    """Parse the model's JSON response into a CommandResult."""
+def parse_command_result(content: str) -> AssistantResult:
+    """Parse the model's JSON response into an AssistantResult."""
 
     data = _loads_json(content)
     command = _string(data.get("command"))
+    answer = _string(data.get("answer"))
     explanation = _string(data.get("explanation"))
     risk_level = _risk_level(data.get("risk_level"))
     risk_reason = _string(data.get("risk_reason"))
-    alternatives = _string_list(data.get("alternatives"))
     clarification = _string(data.get("clarification"))
+    error = _string(data.get("error"))
+    kind = _result_kind(data.get("kind"), command, answer, clarification, error)
 
-    if not command and not clarification:
-        raise ApiError("AI 响应缺少 command 或 clarification 字段。")
-    if command and not explanation:
+    if kind == "command" and not command:
+        raise ApiError("AI 响应缺少 command 字段。")
+    if kind == "command" and not explanation:
         raise ApiError("AI 响应缺少 explanation 字段。")
-    if risk_level in {"caution", "danger"} and not risk_reason:
+    if kind == "answer" and not answer:
+        raise ApiError("AI 响应缺少 answer 字段。")
+    if kind == "clarification" and not clarification:
+        raise ApiError("AI 响应缺少 clarification 字段。")
+    if kind == "error" and not error:
+        raise ApiError("AI 响应缺少 error 字段。")
+    if kind == "command" and risk_level in {"caution", "danger"} and not risk_reason:
         risk_reason = "AI 标记该命令存在风险。"
 
-    return CommandResult(
+    return AssistantResult(
+        kind=kind,
         command=command,
+        answer=answer,
         explanation=explanation,
         risk_level=risk_level,
         risk_reason=risk_reason,
-        alternatives=alternatives,
         clarification=clarification,
+        error=error,
     )
 
 
-def result_to_assistant_message(result: CommandResult) -> ChatMessage:
+def result_to_assistant_message(result: AssistantResult) -> ChatMessage:
     """Serialize a command result back into conversation history."""
 
     return {
         "role": "assistant",
         "content": json.dumps(
             {
+                "kind": result.kind,
                 "command": result.command,
+                "answer": result.answer,
                 "explanation": result.explanation,
                 "risk_level": result.risk_level,
                 "risk_reason": result.risk_reason,
-                "alternatives": result.alternatives,
                 "clarification": result.clarification,
+                "error": result.error,
             },
             ensure_ascii=False,
         ),
@@ -207,14 +233,28 @@ def _risk_level(value: object) -> RiskLevel:
     return "caution"
 
 
+def _result_kind(
+    value: object,
+    command: str,
+    answer: str,
+    clarification: str,
+    error: str,
+) -> ResultKind:
+    if value in {"command", "answer", "clarification", "blocked", "error"}:
+        return value  # type: ignore[return-value]
+    if command:
+        return "command"
+    if answer:
+        return "answer"
+    if clarification:
+        return "clarification"
+    if error:
+        return "error"
+    raise ApiError("AI 响应缺少可识别的结果类型。")
+
+
 def _string(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def _truncate(value: str, limit: int) -> str:
