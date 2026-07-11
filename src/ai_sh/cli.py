@@ -28,10 +28,12 @@ from ai_sh.protocol import (
     ProtocolResponse,
     MAX_STDIN_CONTEXT_CHARS,
     exit_code_for_result,
+    read_nul_protocol_request,
     read_protocol_request,
     redact_sensitive,
     validate_protocol_fields,
 )
+from ai_sh.shell import render_bash_init
 from ai_sh.suggestion import create_suggestion, normalize_result
 from ai_sh.ui import (
     console,
@@ -184,11 +186,23 @@ def configure(
 
 
 @ai_sh.command("suggest", context_settings={"help_option_names": ["-h", "--help"]})
-def suggest_machine() -> None:
+@click.option(
+    "--input-format",
+    type=click.Choice(["json", "nul"]),
+    default="json",
+    show_default=True,
+    help="stdin request encoding.",
+)
+def suggest_machine(input_format: str) -> None:
     """Read a versioned request from stdin and write one JSON response."""
 
     try:
-        protocol_request = read_protocol_request(click.get_binary_stream("stdin"))
+        stream = click.get_binary_stream("stdin")
+        protocol_request = (
+            read_nul_protocol_request(stream)
+            if input_format == "nul"
+            else read_protocol_request(stream)
+        )
     except ProtocolInputError as exc:
         _emit_protocol_response(
             ProtocolResponse.error_response(str(exc)),
@@ -201,6 +215,24 @@ def suggest_machine() -> None:
         current_command=protocol_request.buffer,
     )
     _emit_protocol_response(response, exit_code)
+
+
+@ai_sh.group("init", context_settings={"help_option_names": ["-h", "--help"]})
+def init_shell() -> None:
+    """Generate opt-in shell integration scripts."""
+
+
+@init_shell.command("bash", context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "--key-binding",
+    default=r"\C-g",
+    show_default=True,
+    help="Bash Readline key sequence.",
+)
+def init_bash(key_binding: str) -> None:
+    """Print the Bash Readline widget initialization script."""
+
+    click.echo(render_bash_init(key_binding=key_binding))
 
 
 def _machine_suggestion_response(

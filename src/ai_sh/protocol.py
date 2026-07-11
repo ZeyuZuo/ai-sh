@@ -115,6 +115,22 @@ def read_protocol_request(stream: BinaryIO) -> ProtocolRequest:
     )
 
 
+def read_nul_protocol_request(stream: BinaryIO) -> ProtocolRequest:
+    """Read a shell-safe request and buffer separated by one NUL byte."""
+
+    payload = stream.read(MAX_PROTOCOL_INPUT_BYTES + 1)
+    if len(payload) > MAX_PROTOCOL_INPUT_BYTES:
+        raise ProtocolInputError(f"请求数据超过 {MAX_PROTOCOL_INPUT_BYTES} 字节限制。")
+    parts = payload.split(b"\0")
+    if len(parts) != 2:
+        raise ProtocolInputError("NUL 请求必须包含 request 和 buffer 两个字段。")
+    try:
+        request, buffer = (part.decode("utf-8") for part in parts)
+    except UnicodeDecodeError as exc:
+        raise ProtocolInputError("协议请求必须使用 UTF-8 编码。") from exc
+    return validate_protocol_fields(request, buffer)
+
+
 def validate_protocol_fields(request: object, buffer: object) -> ProtocolRequest:
     """Validate request and buffer values shared by machine entry points."""
 

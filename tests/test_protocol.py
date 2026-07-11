@@ -15,6 +15,7 @@ from ai_sh.protocol import (
     PROTOCOL_VERSION,
     ProtocolExitCode,
     ProtocolInputError,
+    read_nul_protocol_request,
     read_protocol_request,
 )
 from ai_sh.suggestion import Suggestion
@@ -282,6 +283,51 @@ def test_suggest_protocol_reports_total_byte_limit_as_json() -> None:
 def test_protocol_input_requires_utf8() -> None:
     with pytest.raises(ProtocolInputError, match="UTF-8"):
         read_protocol_request(BytesIO(b"\xff"))
+
+
+def test_nul_protocol_preserves_request_and_buffer() -> None:
+    request = "按时间排序\n保留空格"
+    buffer = "find src -type f | head"
+
+    parsed = read_nul_protocol_request(
+        BytesIO(request.encode() + b"\0" + buffer.encode())
+    )
+
+    assert parsed.request == request
+    assert parsed.buffer == buffer
+
+
+def test_nul_protocol_requires_exactly_two_fields() -> None:
+    with pytest.raises(ProtocolInputError, match="两个字段"):
+        read_nul_protocol_request(BytesIO(b"request-only"))
+
+
+def test_suggest_cli_accepts_nul_transport(monkeypatch, tmp_path) -> None:
+    captured: dict[str, str] = {}
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+
+    def fake_create(config, request, *, current_command="", **kwargs):
+        captured.update(request=request, buffer=current_command)
+        return Suggestion(
+            AssistantResult(
+                command="find src -type f | sort",
+                explanation="sort files",
+                risk_level="safe",
+            ),
+            {"cwd": str(tmp_path)},
+        )
+
+    monkeypatch.setattr("ai_sh.cli.create_suggestion", fake_create)
+
+    invocation = CliRunner().invoke(
+        ai_sh,
+        ["suggest", "--input-format", "nul"],
+        input="按时间排序\0find src -type f",
+    )
+
+    assert invocation.exit_code == ProtocolExitCode.SUCCESS
+    assert captured == {"request": "按时间排序", "buffer": "find src -type f"}
+    assert json.loads(invocation.stdout)["kind"] == "command"
 
 
 def _invoke_suggest(*, request: str = "列出文件", buffer: str = ""):
