@@ -1,9 +1,17 @@
-import pytest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
+import httpx
+import pytest
+from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
+
+from tmksh.config import ApiConfig, Config
 from tmksh.exceptions import ApiError
 from tmksh.llm import (
     build_answer_messages,
     build_messages,
+    generate_answer,
+    generate_command,
     parse_answer,
     parse_command_result,
 )
@@ -101,3 +109,87 @@ def test_parse_answer_normalizes_text_and_rejects_empty() -> None:
     assert parse_answer("  普通文本回答。\n") == "普通文本回答。"
     with pytest.raises(ApiError, match="空回答"):
         parse_answer("  ")
+
+
+@pytest.mark.parametrize(
+    "api_exception",
+    [
+        APITimeoutError(httpx.Request("POST", "https://api.example.test/v1/chat")),
+        APIConnectionError(
+            request=httpx.Request("POST", "https://api.example.test/v1/chat")
+        ),
+    ],
+)
+def test_generate_command_maps_network_failures(monkeypatch, api_exception) -> None:
+    client = _mock_client(monkeypatch)
+    client.chat.completions.create.side_effect = api_exception
+
+    with pytest.raises(ApiError, match="连接 AI 服务超时或失败"):
+        generate_command(_config(), _messages())
+
+
+def test_generate_command_maps_rate_limit(monkeypatch) -> None:
+    client = _mock_client(monkeypatch)
+    request = httpx.Request("POST", "https://api.example.test/v1/chat")
+    client.chat.completions.create.side_effect = RateLimitError(
+        "rate limited",
+        response=httpx.Response(429, request=request),
+        body=None,
+    )
+
+    with pytest.raises(ApiError, match="返回限流"):
+        generate_command(_config(), _messages())
+
+
+def test_generate_command_retries_without_json_mode(monkeypatch) -> None:
+    client = _mock_client(monkeypatch)
+    request = httpx.Request("POST", "https://api.example.test/v1/chat")
+    rejection = BadRequestError(
+        "response_format json_object is unsupported",
+        response=httpx.Response(400, request=request),
+        body=None,
+    )
+    client.chat.completions.create.side_effect = [
+        rejection,
+        _response(
+            '{"kind":"command","command":"git status","explanation":"查看状态",'
+            '"risk_level":"safe","risk_reason":""}'
+        ),
+    ]
+
+    result = generate_command(_config(), _messages())
+
+    assert result.command == "git status"
+    first_call, second_call = client.chat.completions.create.call_args_list
+    assert first_call.kwargs["response_format"] == {"type": "json_object"}
+    assert "response_format" not in second_call.kwargs
+
+
+def test_generate_answer_maps_network_failure(monkeypatch) -> None:
+    client = _mock_client(monkeypatch)
+    client.chat.completions.create.side_effect = APITimeoutError(
+        httpx.Request("POST", "https://api.example.test/v1/chat")
+    )
+
+    with pytest.raises(ApiError, match="连接 AI 服务超时或失败"):
+        generate_answer(_config(), _messages())
+
+
+def _config() -> Config:
+    return Config(api=ApiConfig(api_key="test-key"))
+
+
+def _messages():
+    return [{"role": "user", "content": "test"}]
+
+
+def _response(content: str):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
+
+
+def _mock_client(monkeypatch) -> Mock:
+    client = Mock()
+    monkeypatch.setattr("tmksh.llm.OpenAI", lambda **kwargs: client)
+    return client
