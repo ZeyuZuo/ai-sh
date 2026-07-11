@@ -8,7 +8,7 @@
 
 `tmksh` 是一个 Python 命令行工具，让用户用自然语言描述意图，由 AI 生成经过本地安全检查的 shell 命令建议。详细需求见 `PRD.md` 和 v0.2 方案文档。
 
-> **v0.2 开发方向（2026-07-11）：** 项目已决定改为 Shell 原生的命令输入助手。AI 只把建议命令写入当前 Shell 的输入缓冲区，永不自动执行；独立 REPL 降级为 legacy 功能；管道问答与命令生成分离。目标交互、技术边界、迁移策略和实施顺序见 [`docs/SHELL_NATIVE_PLAN.md`](docs/SHELL_NATIVE_PLAN.md)。进行 v0.2 开发时，该文档优先于本文和 `docs/PRD.md` 中描述 v0.1 产品形态的内容。
+> **v0.2 产品方向（2026-07-12）：** 项目已改为 Shell 原生的命令输入助手。AI 只把建议命令写入当前 Shell 的输入缓冲区，永不自动执行；旧 REPL 和内部执行器已经删除；管道问答与命令生成分离。当前优先级见 [`docs/ROADMAP.md`](docs/ROADMAP.md)，技术背景见 [`docs/SHELL_NATIVE_PLAN.md`](docs/SHELL_NATIVE_PLAN.md)。两者优先于本文和 `docs/PRD.md` 中描述的 v0.1 产品形态。
 
 ---
 
@@ -88,7 +88,7 @@ tmksh/
 │       ├── llm.py          # OpenAI SDK 封装，prompt 管理
 │       ├── suggestion.py   # 建议生成编排和最终安全归一化
 │       ├── protocol.py     # 版本化 stdin/stdout 机器协议
-│       ├── shell/          # Bash Readline 和 Zsh ZLE 脚本生成器
+│       ├── shell/          # Bash、Zsh 和 Fish Widget 脚本生成器
 │       ├── safety.py       # 本地危险命令检测
 │       ├── history.py      # 建议历史持久化
 │       └── ui.py           # rich 渲染，交互提示

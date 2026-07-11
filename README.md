@@ -13,7 +13,7 @@
 ## Highlights
 
 - 自然语言生成 shell 命令
-- Bash 和 Zsh 原生命令行 Widget，默认快捷键 `Ctrl+G`
+- Bash、Zsh 和 Fish 原生命令行 Widget，默认快捷键 `Ctrl+G`
 - 独立的 `tmksh ask` 管道内容分析和普通问答模式
 - 单次建议模式，任何建议都不由 tmksh 执行
 - `tmksh --json` 和 `tmksh suggest` 稳定机器接口
@@ -269,7 +269,7 @@ src/tmksh/
   llm.py        # 命令 JSON 与问答纯文本的独立提示词、调用和解析
   suggestion.py # 建议生成编排和最终安全归一化
   protocol.py   # Shell Widget 使用的版本化机器协议
-  shell/        # Bash Readline 和 Zsh ZLE 初始化脚本
+  shell/        # Bash、Zsh 和 Fish Widget 初始化脚本
   safety.py     # 本地危险命令检测
   history.py    # 本地建议历史
   ui.py         # Rich 人类可读结果渲染
@@ -285,6 +285,6 @@ src/tmksh/
 
 ## Status
 
-包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消所有执行路径并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP；阶段四已经将管道分析拆分为独立的 `tmksh ask` 问答模式。
+当前版本是 `0.2.0`。默认路径已经取消所有执行能力，并提供 `protocol_version=1` 机器接口、Bash/Zsh/Fish Shell Widget，以及独立的 `tmksh ask` 问答模式。版本变化见 [CHANGELOG](CHANGELOG.md)，从 v0.1 升级见 [迁移说明](docs/MIGRATION_V0.2.md)。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。当前产品路线见 [产品与工程路线](docs/ROADMAP.md)，Shell 原生改造的设计背景见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。

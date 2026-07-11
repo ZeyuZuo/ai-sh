@@ -1,6 +1,6 @@
 # tmksh 产品与工程路线
 
-**状态：** Draft  
+**状态：** Active；P0 已完成
 **更新日期：** 2026-07-12  
 **产品定位：** 在用户当前 Shell 中，用自然语言生成、解释和修正下一条可编辑命令。
 
@@ -33,7 +33,7 @@ tmksh 是 Shell 输入助手，不是另一个 Shell，也不是无人值守 Age
 
 已经具备：
 
-- Bash Readline 和 Zsh ZLE Widget。
+- Bash Readline、Zsh ZLE 和 Fish commandline Widget。
 - `protocol_version=1` 的 JSON/NUL 机器协议。
 - OpenAI-compatible 命令生成和独立 `ask` 问答。
 - 当前 cwd、OS、Shell 和可用工具上下文。
@@ -43,7 +43,7 @@ tmksh 是 Shell 输入助手，不是另一个 Shell，也不是无人值守 Age
 
 当前主要缺口：
 
-- 尚无 Fish 集成和正式 CI 发布链。
+- v0.2 发布后需要观察三种 Shell 的真实使用反馈。
 - 模型不了解项目约定，也不了解上一条失败命令。
 - 非空 buffer 只能笼统视为“修改”，缺少明确的解释和检查操作。
 - 单一 API 配置不利于本地、工作和个人环境切换。
@@ -52,6 +52,8 @@ tmksh 是 Shell 输入助手，不是另一个 Shell，也不是无人值守 Age
 ## 4. 实施路线
 
 ### P0：完成 v0.2 发布基础
+
+**实施状态：已完成。** Fish、CI、wheel smoke test、首批 strict mypy、LLM 兼容错误测试和 v0.2 发布文档均已落地。
 
 先完成现有产品承诺，避免在跨 Shell 和发布质量不稳定时扩展上下文面。
 

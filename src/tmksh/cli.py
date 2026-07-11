@@ -7,6 +7,7 @@ from getpass import getpass
 
 import click
 
+from tmksh import __version__
 from tmksh.answer import MAX_ASK_STDIN_BYTES, create_answer, read_limited_stdin
 from tmksh.config import (
     DEFAULT_BASE_URL,
@@ -41,7 +42,8 @@ class NaturalLanguageGroup(click.Group):
     default_command = "_command"
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        if args and args[0] not in self.commands and args[0] not in {"-h", "--help"}:
+        group_options = {"-h", "--help", "--version"}
+        if args and args[0] not in self.commands and args[0] not in group_options:
             args.insert(0, self.default_command)
         return super().parse_args(ctx, args)
 
@@ -52,6 +54,7 @@ class NaturalLanguageGroup(click.Group):
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 @click.pass_context
+@click.version_option(version=__version__)
 def tmksh(ctx: click.Context) -> None:
     """Generate shell commands and manage tmksh."""
 

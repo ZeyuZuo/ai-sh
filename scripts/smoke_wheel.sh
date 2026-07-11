@@ -15,6 +15,7 @@ python -m venv "$smoke_dir/venv"
 
 tmksh="$smoke_dir/venv/bin/tmksh"
 "$tmksh" --help >/dev/null
+"$tmksh" --version | grep --quiet '0.2.0'
 "$tmksh" config --show >/dev/null
 "$tmksh" ask --help >/dev/null
 "$tmksh" suggest --help >/dev/null

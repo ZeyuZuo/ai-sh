@@ -160,6 +160,13 @@ def test_tmksh_without_subcommand_shows_unified_help() -> None:
     assert "REPL 已启动" not in invocation.output
 
 
+def test_tmksh_reports_package_version() -> None:
+    invocation = CliRunner().invoke(tmksh, ["--version"])
+
+    assert invocation.exit_code == 0
+    assert invocation.output == "tmksh, version 0.2.0\n"
+
+
 def test_piped_stdin_is_read_with_a_limit(monkeypatch) -> None:
     class LargeStdin:
         def isatty(self) -> bool:
