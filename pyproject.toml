@@ -17,6 +17,7 @@ tmksh = "tmksh.cli:tmksh"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.14",
     "pytest>=8.0",
     "ruff>=0.8",
 ]
@@ -27,3 +28,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tmksh"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = [
+    "src/tmksh/config.py",
+    "src/tmksh/protocol.py",
+    "src/tmksh/suggestion.py",
+    "src/tmksh/shell",
+]

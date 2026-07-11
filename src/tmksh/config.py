@@ -5,15 +5,16 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from tmksh.exceptions import ConfigError
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover - only exercised on Python 3.10
+else:  # pragma: no cover - only exercised on Python 3.10
     import tomli as tomllib
 
 CONFIG_DIR = Path.home() / ".tmksh"
