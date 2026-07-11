@@ -41,6 +41,12 @@ __ai_sh_json_field() {
     "$AI_SH_PYTHON" -c '@@AI_SH_JSON_FIELD@@' "$1"
 }
 
+__ai_sh_read_input() {
+    local prompt="$1"
+    # A separate TTY process consumes Enter without leaking it to outer Readline.
+    REPLY="$("$AI_SH_COMMAND" _prompt --label "$prompt")"
+}
+
 __ai_sh_widget() {
     local original_line="$READLINE_LINE"
     local original_point="$READLINE_POINT"
@@ -50,15 +56,17 @@ __ai_sh_widget() {
     local message=""
     local question=""
     local answer=""
+    local REPLY=""
     local status=0
     local attempts=0
 
     printf '\n'
-    if ! IFS= read -r -p 'ai> ' request; then
+    if ! __ai_sh_read_input 'ai> '; then
         READLINE_LINE="$original_line"
         READLINE_POINT="$original_point"
         return 0
     fi
+    request="$REPLY"
     if [[ -z "${request//[[:space:]]/}" ]]; then
         READLINE_LINE="$original_line"
         READLINE_POINT="$original_point"
@@ -90,11 +98,12 @@ __ai_sh_widget() {
         if (( status == 30 )); then
             question="$(printf '%s' "$response" | __ai_sh_json_field clarification)"
             printf '%s\n' "需要澄清：${question:-请补充必要信息。}"
-            if ! IFS= read -r -p '补充> ' answer; then
+            if ! __ai_sh_read_input '补充> '; then
                 READLINE_LINE="$original_line"
                 READLINE_POINT="$original_point"
                 return 0
             fi
+            answer="$REPLY"
             if [[ -z "${answer//[[:space:]]/}" ]]; then
                 READLINE_LINE="$original_line"
                 READLINE_POINT="$original_point"

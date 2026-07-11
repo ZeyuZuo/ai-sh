@@ -34,6 +34,7 @@ from ai_sh.protocol import (
     validate_protocol_fields,
 )
 from ai_sh.shell import render_bash_init, render_zsh_init
+from ai_sh.shell.prompt import prompt_from_tty
 from ai_sh.suggestion import create_suggestion, normalize_result
 from ai_sh.ui import (
     console,
@@ -246,6 +247,18 @@ def init_zsh(key_binding: str) -> None:
     """Print the Zsh ZLE widget initialization script."""
 
     click.echo(render_zsh_init(key_binding=key_binding))
+
+
+@ai_sh.command("_prompt", hidden=True)
+@click.option("--label", default="ai> ", help="Prompt label.")
+def widget_prompt(label: str) -> None:
+    """Read one line from the controlling terminal for a shell widget."""
+
+    try:
+        value = prompt_from_tty(label)
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit(130) from None
+    click.echo(value)
 
 
 def _machine_suggestion_response(

@@ -16,6 +16,7 @@ def test_bash_init_command_outputs_loadable_script() -> None:
     assert "READLINE_LINE" in invocation.stdout
     assert "bind -x" in invocation.stdout
     assert "suggest --input-format nul" in invocation.stdout
+    assert '_prompt --label "$prompt"' in invocation.stdout
 
     syntax = subprocess.run(
         ["bash", "-n"],
@@ -36,6 +37,18 @@ def test_bash_init_supports_custom_binding() -> None:
 
     assert r'"\C-x\C-a":__ai_sh_widget' in script
     assert "'/opt/ai sh/bin/ai-sh'" in script
+
+
+def test_internal_widget_prompt_falls_back_to_stdin() -> None:
+    invocation = CliRunner().invoke(
+        ai_sh,
+        ["_prompt", "--label", "ai> "],
+        input="测试输入\n",
+    )
+
+    assert invocation.exit_code == 0
+    assert invocation.stdout == "测试输入\n"
+    assert invocation.stderr == "ai> "
 
 
 def test_bash_widget_replaces_buffer_without_executing(tmp_path) -> None:
@@ -157,7 +170,18 @@ def _write_fake_backend(tmp_path: Path) -> Path:
     path = tmp_path / "fake-ai-sh"
     script = f"""#!{sys.executable}
 import json
+import os
 import sys
+
+if len(sys.argv) > 1 and sys.argv[1] == "_prompt":
+    value = bytearray()
+    while True:
+        character = os.read(0, 1)
+        if not character or character in {{b"\\n", b"\\r"}}:
+            break
+        value.extend(character)
+    print(value.decode())
+    raise SystemExit(0)
 
 request_bytes, buffer_bytes = sys.stdin.buffer.read().split(b"\\0", 1)
 request = request_bytes.decode()
