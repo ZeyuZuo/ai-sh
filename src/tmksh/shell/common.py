@@ -13,7 +13,7 @@ def current_command_path() -> str:
     resolved = shutil.which(sys.argv[0])
     if resolved:
         return str(Path(resolved).resolve())
-    return sys.argv[0] or "ai-sh"
+    return sys.argv[0] or "tmksh"
 
 
 JSON_FIELD_PROGRAM = """
@@ -34,7 +34,7 @@ if field == "message":
             or data.get("clarification")
             or data.get("risk_reason")
             or data.get("explanation")
-            or "ai-sh did not return a usable result."
+            or "tmksh did not return a usable result."
         )
 else:
     value = data.get(field, "")

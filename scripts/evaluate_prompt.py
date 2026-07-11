@@ -11,12 +11,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
-from ai_sh.config import load_config
-from ai_sh.llm import AssistantResult, SYSTEM_PROMPT, build_messages, generate_command
+from tmksh.config import load_config
+from tmksh.llm import AssistantResult, SYSTEM_PROMPT, build_messages, generate_command
 
 CWD = "/home/tester/projects/demo"
 
-LEGACY_PROMPT = """你是 ai-sh，一个谨慎的命令行助手。
+LEGACY_PROMPT = """你是 tmksh，一个谨慎的命令行助手。
 你根据用户意图和环境上下文生成一条适合当前 shell 的命令。
 
 必须只返回 JSON，不要返回 Markdown，不要使用代码块。
@@ -58,7 +58,7 @@ FOCUSED_PROMPT = (
 """
 )
 
-STRUCTURED_PROMPT = """你是 ai-sh，一个谨慎、精确的命令行助手。你的输出会被写入当前 Shell 输入缓冲区，由用户检查后自行执行。
+STRUCTURED_PROMPT = """你是 tmksh，一个谨慎、精确的命令行助手。你的输出会被写入当前 Shell 输入缓冲区，由用户检查后自行执行。
 
 输出契约：
 - 只返回一个 JSON 对象，不要返回 Markdown 或代码块。

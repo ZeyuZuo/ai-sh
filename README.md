@@ -1,8 +1,8 @@
-# ai-sh
+# tmksh
 
 把自然语言变成可检查、可解释、可拦截的 shell 命令建议。
 
-`ai-sh` 是一个面向开发者和运维人员的命令行助手。你描述想做什么，它会结合当前目录、shell、操作系统和常用工具生成一条 shell 命令，解释它的作用并标记风险。默认 `ai` 只展示建议，永不执行；危险命令会在展示前被本地安全层拦截。
+`tmksh` 是一个面向开发者和运维人员的命令行助手。你描述想做什么，它会结合当前目录、shell、操作系统和常用工具生成一条 shell 命令，解释它的作用并标记风险。默认 `tmksh` 只展示建议，永不执行；危险命令会在展示前被本地安全层拦截。
 
 第一版默认使用 SiliconFlow 的 OpenAI 兼容 API：
 
@@ -14,9 +14,9 @@
 
 - 自然语言生成 shell 命令
 - Bash 和 Zsh 原生命令行 Widget，默认快捷键 `Ctrl+G`
-- 独立的 `ai --ask` 管道内容分析和普通问答模式
+- 独立的 `tmksh ask` 管道内容分析和普通问答模式
 - 单次建议模式和显式 legacy REPL
-- `ai --json` 和 `ai-sh suggest` 稳定机器接口
+- `tmksh --json` 和 `tmksh suggest` 稳定机器接口
 - 自动收集 cwd、shell、OS、用户名和 PATH 中的关键工具
 - 每条命令都有解释和风险等级
 - 本地硬拦截危险命令，不依赖模型自觉
@@ -29,26 +29,25 @@
 开发版：
 
 ```bash
-git clone git@github.com:ZeyuZuo/ai-sh.git
-cd ai-sh
+git clone git@github.com:ZeyuZuo/tmksh.git
+cd tmksh
 uv sync
 ```
 
 本地运行：
 
 ```bash
-uv run ai --help
-uv run ai-sh --help
+uv run tmksh --help
 ```
 
 在当前 Shell 会话加载 Widget：
 
 ```bash
 # Bash
-eval "$(uv run ai-sh init bash)"
+eval "$(uv run tmksh init bash)"
 
 # Zsh
-eval "$(uv run ai-sh init zsh)"
+eval "$(uv run tmksh init zsh)"
 ```
 
 脚本只注册快捷键，不会修改 `.bashrc` 或 `.zshrc`。确认可用后，可由用户自行把对应的 `eval` 行加入 Shell 配置；正式安装后通常不需要其中的 `uv run`。
@@ -56,13 +55,13 @@ eval "$(uv run ai-sh init zsh)"
 首次使用前配置 API：
 
 ```bash
-uv run ai-sh config
+uv run tmksh config
 ```
 
 也可以一次性写入：
 
 ```bash
-uv run ai-sh config \
+uv run tmksh config \
   --base-url "https://api.siliconflow.cn/v1" \
   --model "deepseek-ai/DeepSeek-V3.2" \
   --api-key "your-siliconflow-api-key"
@@ -77,22 +76,22 @@ uv build
 如果你的机器没有 `.python-version` 指定的 Python，uv 可能会尝试下载解释器。也可以显式使用已有的 Python：
 
 ```bash
-uv run --python 3.14 ai --help
+uv run --python 3.14 tmksh --help
 uv build --python 3.14
 ```
 
 ## Configure
 
-推荐用 `ai-sh config` 写入本地配置：
+推荐用 `tmksh config` 写入本地配置：
 
 ```bash
-uv run ai-sh config
+uv run tmksh config
 ```
 
 查看当前配置状态：
 
 ```bash
-uv run ai-sh config --show
+uv run tmksh config --show
 ```
 
 `--show` 不会打印 API key，只会显示是否已配置。
@@ -111,16 +110,10 @@ export SILICONFLOW_API="your-siliconflow-api-key"
 SILICONFLOW_API="your-siliconflow-api-key"
 ```
 
-也可以生成默认配置文件：
-
-```bash
-uv run ai --init-config
-```
-
 配置文件位置：
 
 ```text
-~/.ai-sh/config.toml
+~/.tmksh/config.toml
 ```
 
 默认配置：
@@ -141,7 +134,9 @@ language = "zh"
 hard_block_enabled = true
 ```
 
-`base_url` 和 `model` 从 `~/.ai-sh/config.toml` 读取。`api_key` 的读取优先级是：已 export 的 `SILICONFLOW_API` 环境变量优先，其次是当前目录 `.env`、`~/.ai-sh/.env`，最后是配置文件中的 `api_key`。
+`base_url` 和 `model` 从 `~/.tmksh/config.toml` 读取。`api_key` 的读取优先级是：已 export 的 `SILICONFLOW_API` 环境变量优先，其次是当前目录 `.env`、`~/.tmksh/.env`，最后是配置文件中的 `api_key`。
+
+从旧版升级时，tmksh 会在新文件不存在的前提下，把 `~/.ai-sh` 中的配置、`.env`、历史和 REPL 记录复制到 `~/.tmksh`。旧目录不会自动删除，可在确认新版本工作正常后自行清理。
 
 ## Usage
 
@@ -151,7 +146,7 @@ hard_block_enabled = true
 
 ```text
 $ <Ctrl+G>
-ai> 找出当前目录下最大的十个文件
+tmksh> 找出当前目录下最大的十个文件
 
 safe · 查找并按大小排序文件
 $ find . -type f -printf '%s %p\n' | sort -nr | head -n 10
@@ -163,7 +158,7 @@ $ find . -type f -printf '%s %p\n' | sort -nr | head -n 10
 
 ```text
 $ find src -type f <Ctrl+G>
-ai> 按修改时间倒序排列
+tmksh> 按修改时间倒序排列
 
 $ find src -type f -printf '%T@ %p\n' | sort -nr
 ```
@@ -171,8 +166,8 @@ $ find src -type f -printf '%T@ %p\n' | sort -nr
 自定义快捷键：
 
 ```bash
-eval "$(ai-sh init bash --key-binding '\C-x\C-a')"
-eval "$(ai-sh init zsh --key-binding '^X^A')"
+eval "$(tmksh init bash --key-binding '\C-x\C-a')"
+eval "$(tmksh init zsh --key-binding '^X^A')"
 ```
 
 ### CLI
@@ -180,7 +175,7 @@ eval "$(ai-sh init zsh --key-binding '^X^A')"
 单次生成命令建议：
 
 ```bash
-uv run ai "找出当前目录下超过 100MB 的文件"
+uv run tmksh "找出当前目录下超过 100MB 的文件"
 ```
 
 该命令会展示建议、解释和风险，不会执行建议命令。
@@ -188,45 +183,45 @@ uv run ai "找出当前目录下超过 100MB 的文件"
 获取相同结构的 JSON 输出：
 
 ```bash
-uv run ai --json "找出当前目录下超过 100MB 的文件"
+uv run tmksh --json "找出当前目录下超过 100MB 的文件"
 ```
 
 分析管道内容时使用独立问答模式：
 
 ```bash
-git diff | uv run ai --ask "总结这些修改"
-journalctl -u my-service -n 200 | uv run ai --ask "分析失败原因"
+git diff | uv run tmksh ask "总结这些修改"
+journalctl -u my-service -n 200 | uv run tmksh ask "分析失败原因"
 ```
 
 也可以不使用管道，直接提问：
 
 ```bash
-uv run ai --ask "解释 git rebase 和 merge 的区别"
+uv run tmksh ask "解释 git rebase 和 merge 的区别"
 ```
 
-`--ask` 直接输出自然语言答案，不生成命令、不进入命令安全或执行流程，也不写入建议历史。管道输入按原始 UTF-8 数据流读取，最多保留 64 KiB；超过限制时 stderr 会显示截断警告，模型也会收到内容不完整的标记。问答失败返回非零退出码。
+`tmksh ask` 直接输出自然语言答案，不生成命令、不进入命令安全或执行流程，也不写入建议历史。管道输入按原始 UTF-8 数据流读取，最多保留 64 KiB；超过限制时 stderr 会显示截断警告，模型也会收到内容不完整的标记。问答失败返回非零退出码。
 
-Shell Widget 使用的版本化 stdin/stdout 协议由 `ai-sh suggest` 提供，格式、限制和退出码见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md#7-后端结果协议)。
+Shell Widget 使用的版本化 stdin/stdout 协议由 `tmksh suggest` 提供，格式、限制和退出码见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md#7-后端结果协议)。
 
 旧版 REPL 暂时保留为显式 legacy 命令：
 
 ```bash
-uv run ai-sh repl
+uv run tmksh repl
 ```
 
 REPL 示例：
 
 ```text
-ai> 找出最近一天修改的 python 文件
-ai> 把刚才的结果只保留 src/ 目录下的
-ai> 用 wc -l 统计一下行数
+tmksh> 找出最近一天修改的 python 文件
+tmksh> 把刚才的结果只保留 src/ 目录下的
+tmksh> 用 wc -l 统计一下行数
 ```
 
-`--dry-run` 仅作为兼容参数保留；默认 `ai` 已经始终是 dry-run 语义。
+`--dry-run` 仅作为兼容参数保留；默认 `tmksh` 已经始终是 dry-run 语义。
 
 ## Safety Model
 
-`ai-sh` 的安全策略是多层的：
+`tmksh` 的安全策略是多层的：
 
 1. 模型必须返回 JSON，其中包含 `risk_level`: `safe`、`caution` 或 `danger`。
 2. 本地正则和参数解析只硬拦截灾难级危险命令。
@@ -283,9 +278,9 @@ uv build
 ## Project Layout
 
 ```text
-src/ai_sh/
+src/tmksh/
   answer.py     # 独立问答编排和 stdin 流式限长读取
-  cli.py        # click 入口：ai 和 ai-sh
+  cli.py        # click 入口：tmksh 单一命令
   config.py     # 配置读取和默认值
   context.py    # 环境上下文收集
   llm.py        # 命令 JSON 与问答纯文本的独立提示词、调用和解析
@@ -302,12 +297,12 @@ src/ai_sh/
 
 - API key 不写入历史。
 - API key 不打印到终端。
-- 历史记录只保存在本地 `~/.ai-sh/history.json`。
-- `ai --ask` 的问题和 stdin 内容不写入持久化历史。
+- 历史记录只保存在本地 `~/.tmksh/history.json`。
+- `tmksh ask` 的问题和 stdin 内容不写入持久化历史。
 - 除了调用你配置的 API endpoint，项目不会把命令数据发送到其他远端。
 
 ## Status
 
-包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP；阶段四已经将管道分析拆分为独立的 `ai --ask` 问答模式。legacy REPL 只用于迁移兼容。
+包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP；阶段四已经将管道分析拆分为独立的 `tmksh ask` 问答模式。legacy REPL 只用于迁移兼容。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。目标逻辑和分阶段开发计划见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。

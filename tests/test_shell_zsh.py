@@ -6,38 +6,38 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from ai_sh.cli import ai_sh
-from ai_sh.shell import render_bash_init, render_zsh_init
+from tmksh.cli import tmksh
+from tmksh.shell import render_bash_init, render_zsh_init
 
 ZSH = shutil.which("zsh")
 
 
 def test_zsh_init_command_outputs_zle_script() -> None:
-    invocation = CliRunner().invoke(ai_sh, ["init", "zsh"])
+    invocation = CliRunner().invoke(tmksh, ["init", "zsh"])
 
     assert invocation.exit_code == 0
-    assert "__ai_sh_widget" in invocation.stdout
+    assert "__tmksh_widget" in invocation.stdout
     assert 'original_buffer="$BUFFER"' in invocation.stdout
-    assert "zle -N __ai_sh_widget" in invocation.stdout
-    assert "bindkey '^G' __ai_sh_widget" in invocation.stdout
+    assert "zle -N __tmksh_widget" in invocation.stdout
+    assert "bindkey '^G' __tmksh_widget" in invocation.stdout
     assert "suggest --input-format nul" in invocation.stdout
 
 
 def test_zsh_init_supports_custom_binding_and_quoted_path() -> None:
     script = render_zsh_init(
         key_binding="^[a",
-        command_path="/opt/ai sh/bin/ai-sh",
+        command_path="/opt/tmk sh/bin/tmksh",
         python_path="/opt/python/bin/python",
     )
 
-    assert "bindkey '^[a' __ai_sh_widget" in script
-    assert "'/opt/ai sh/bin/ai-sh'" in script
+    assert "bindkey '^[a' __tmksh_widget" in script
+    assert "'/opt/tmk sh/bin/tmksh'" in script
 
 
 def test_bash_and_zsh_widgets_share_protocol_and_safety_semantics() -> None:
     scripts = [
-        render_bash_init(command_path="ai-sh", python_path="python3"),
-        render_zsh_init(command_path="ai-sh", python_path="python3"),
+        render_bash_init(command_path="tmksh", python_path="python3"),
+        render_zsh_init(command_path="tmksh", python_path="python3"),
     ]
 
     for script in scripts:
@@ -56,7 +56,7 @@ def test_bash_and_zsh_widgets_share_protocol_and_safety_semantics() -> None:
 
 @pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
 def test_zsh_init_script_passes_native_syntax_check() -> None:
-    script = render_zsh_init(command_path="ai-sh", python_path=sys.executable)
+    script = render_zsh_init(command_path="tmksh", python_path=sys.executable)
 
     syntax = subprocess.run(
         [ZSH, "-n"],
@@ -148,9 +148,9 @@ def _run_widget(
 source "$1"
 BUFFER="$2"
 CURSOR=$3
-__ai_sh_widget
-print -r -- "__AI_SH_LINE__=$BUFFER"
-print -r -- "__AI_SH_POINT__=$CURSOR"
+__tmksh_widget
+print -r -- "__TMKSH_LINE__=$BUFFER"
+print -r -- "__TMKSH_POINT__=$CURSOR"
 """
     return subprocess.run(
         [
@@ -171,7 +171,7 @@ print -r -- "__AI_SH_POINT__=$CURSOR"
 
 
 def _write_fake_backend(tmp_path: Path) -> Path:
-    path = tmp_path / "fake-ai-sh"
+    path = tmp_path / "fake-tmksh"
     script = f"""#!{sys.executable}
 import json
 import sys
@@ -214,10 +214,10 @@ raise SystemExit(status)
 
 
 def _line_from_output(output: str) -> str:
-    marker = "__AI_SH_LINE__="
+    marker = "__TMKSH_LINE__="
     return output.split(marker, 1)[1].splitlines()[0]
 
 
 def _point_from_output(output: str) -> int:
-    marker = "__AI_SH_POINT__="
+    marker = "__TMKSH_POINT__="
     return int(output.split(marker, 1)[1].splitlines()[0])

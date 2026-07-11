@@ -1,6 +1,6 @@
-from ai_sh import ui
-from ai_sh.executor import ExecutionResult
-from ai_sh.llm import AssistantResult
+from tmksh import ui
+from tmksh.executor import ExecutionResult
+from tmksh.llm import AssistantResult
 
 
 def test_prompt_confirm_cancel_on_eof(monkeypatch) -> None:

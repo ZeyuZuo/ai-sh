@@ -8,8 +8,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ai_sh.config import CONFIG_DIR
-from ai_sh.llm import ChatMessage
+from tmksh.config import CONFIG_DIR
+from tmksh.llm import ChatMessage
 
 HISTORY_PATH = CONFIG_DIR / "history.json"
 
@@ -26,7 +26,7 @@ class HistoryEntry:
 
 
 class HistoryStore:
-    """Read and write local ai-sh history."""
+    """Read and write local tmksh history."""
 
     def __init__(self, path: Path = HISTORY_PATH, *, limit: int = 50) -> None:
         self.path = path

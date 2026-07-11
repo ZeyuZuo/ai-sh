@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ai_sh.config import Config
-from ai_sh.context import collect_context
-from ai_sh.history import Conversation
-from ai_sh.llm import AssistantResult, build_messages, generate_command
-from ai_sh.safety import check_command
+from tmksh.config import Config
+from tmksh.context import collect_context
+from tmksh.history import Conversation
+from tmksh.llm import AssistantResult, build_messages, generate_command
+from tmksh.safety import check_command
 
 
 @dataclass(frozen=True)

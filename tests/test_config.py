@@ -1,15 +1,16 @@
 import os
 import stat
 
-from ai_sh.config import (
+from tmksh.config import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     ensure_default_config,
     load_config,
+    migrate_legacy_state,
     validate_api_config,
     write_config,
 )
-from ai_sh.exceptions import ConfigError
+from tmksh.exceptions import ConfigError
 
 
 def test_load_config_defaults_and_env_override(tmp_path, monkeypatch) -> None:
@@ -70,7 +71,7 @@ def test_load_config_reads_file_values(tmp_path, monkeypatch) -> None:
 
 
 def test_ensure_default_config_uses_600_permissions(tmp_path) -> None:
-    config_path = tmp_path / ".ai-sh" / "config.toml"
+    config_path = tmp_path / ".tmksh" / "config.toml"
 
     ensure_default_config(config_path)
 
@@ -83,7 +84,7 @@ def test_write_config_persists_api_settings_with_600_permissions(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.delenv("SILICONFLOW_API", raising=False)
-    config_path = tmp_path / ".ai-sh" / "config.toml"
+    config_path = tmp_path / ".tmksh" / "config.toml"
 
     write_config(
         base_url="https://api.example.test/v1",
@@ -100,6 +101,23 @@ def test_write_config_persists_api_settings_with_600_permissions(
     assert config.api.api_key == "secret-key"
 
 
+def test_migrate_legacy_state_copies_private_files_without_overwrite(tmp_path) -> None:
+    legacy_dir = tmp_path / ".ai-sh"
+    target_dir = tmp_path / ".tmksh"
+    legacy_dir.mkdir()
+    (legacy_dir / "config.toml").write_text("legacy-config", encoding="utf-8")
+    (legacy_dir / "history.json").write_text("[]", encoding="utf-8")
+    target_dir.mkdir()
+    (target_dir / "config.toml").write_text("new-config", encoding="utf-8")
+
+    migrated = migrate_legacy_state(legacy_dir, target_dir)
+
+    assert migrated == ("history.json",)
+    assert (target_dir / "config.toml").read_text(encoding="utf-8") == "new-config"
+    assert (target_dir / "history.json").read_text(encoding="utf-8") == "[]"
+    assert stat.S_IMODE((target_dir / "history.json").stat().st_mode) == 0o600
+
+
 def test_validate_api_config_requires_api_key(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("SILICONFLOW_API", raising=False)
     config = load_config(tmp_path / "missing.toml")
@@ -107,6 +125,6 @@ def test_validate_api_config_requires_api_key(tmp_path, monkeypatch) -> None:
     try:
         validate_api_config(config)
     except ConfigError as exc:
-        assert "ai-sh config" in str(exc)
+        assert "tmksh config" in str(exc)
     else:
         raise AssertionError("validate_api_config should require api key")

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import BinaryIO
 
-from ai_sh.config import Config
-from ai_sh.llm import build_answer_messages, generate_answer
+from tmksh.config import Config
+from tmksh.llm import build_answer_messages, generate_answer
 
 MAX_ASK_STDIN_BYTES = 64 * 1024
 _READ_CHUNK_BYTES = 8192

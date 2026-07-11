@@ -1,7 +1,7 @@
 import os
 import stat
 
-from ai_sh.history import Conversation, HistoryStore, new_history_entry
+from tmksh.history import Conversation, HistoryStore, new_history_entry
 
 
 def test_history_store_appends_and_limits_with_600_permissions(tmp_path) -> None:

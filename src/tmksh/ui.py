@@ -16,8 +16,8 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from ai_sh.executor import ExecutionResult
-from ai_sh.llm import AssistantResult
+from tmksh.executor import ExecutionResult
+from tmksh.llm import AssistantResult
 
 ConfirmChoice = Literal["y", "e", "n"]
 

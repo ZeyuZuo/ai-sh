@@ -1,4 +1,4 @@
-from ai_sh.executor import execute_command, summarize_execution
+from tmksh.executor import execute_command, summarize_execution
 
 
 def test_execute_command_captures_output() -> None:

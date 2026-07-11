@@ -1,7 +1,7 @@
 import pytest
 
-from ai_sh.exceptions import ApiError
-from ai_sh.llm import (
+from tmksh.exceptions import ApiError
+from tmksh.llm import (
     build_answer_messages,
     build_messages,
     parse_answer,

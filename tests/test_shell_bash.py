@@ -4,15 +4,15 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from ai_sh.cli import ai_sh
-from ai_sh.shell import render_bash_init
+from tmksh.cli import tmksh
+from tmksh.shell import render_bash_init
 
 
 def test_bash_init_command_outputs_loadable_script() -> None:
-    invocation = CliRunner().invoke(ai_sh, ["init", "bash"])
+    invocation = CliRunner().invoke(tmksh, ["init", "bash"])
 
     assert invocation.exit_code == 0
-    assert "__ai_sh_widget" in invocation.stdout
+    assert "__tmksh_widget" in invocation.stdout
     assert "READLINE_LINE" in invocation.stdout
     assert "bind -x" in invocation.stdout
     assert "suggest --input-format nul" in invocation.stdout
@@ -31,24 +31,24 @@ def test_bash_init_command_outputs_loadable_script() -> None:
 def test_bash_init_supports_custom_binding() -> None:
     script = render_bash_init(
         key_binding=r"\C-x\C-a",
-        command_path="/opt/ai sh/bin/ai-sh",
+        command_path="/opt/tmk sh/bin/tmksh",
         python_path="/opt/python/bin/python",
     )
 
-    assert r'"\C-x\C-a":__ai_sh_widget' in script
-    assert "'/opt/ai sh/bin/ai-sh'" in script
+    assert r'"\C-x\C-a":__tmksh_widget' in script
+    assert "'/opt/tmk sh/bin/tmksh'" in script
 
 
 def test_internal_widget_prompt_falls_back_to_stdin() -> None:
     invocation = CliRunner().invoke(
-        ai_sh,
-        ["_prompt", "--label", "ai> "],
+        tmksh,
+        ["_prompt", "--label", "tmksh> "],
         input="测试输入\n",
     )
 
     assert invocation.exit_code == 0
     assert invocation.stdout == "测试输入\n"
-    assert invocation.stderr == "ai> "
+    assert invocation.stderr == "tmksh> "
 
 
 def test_bash_widget_replaces_buffer_without_executing(tmp_path) -> None:
@@ -143,9 +143,9 @@ def _run_widget(
 source "$1"
 READLINE_LINE="$2"
 READLINE_POINT=$3
-__ai_sh_widget
-printf '\n__AI_SH_LINE__=%s\n' "$READLINE_LINE"
-printf '__AI_SH_POINT__=%s\n' "$READLINE_POINT"
+__tmksh_widget
+printf '\n__TMKSH_LINE__=%s\n' "$READLINE_LINE"
+printf '__TMKSH_POINT__=%s\n' "$READLINE_POINT"
 """
     return subprocess.run(
         [
@@ -167,7 +167,7 @@ printf '__AI_SH_POINT__=%s\n' "$READLINE_POINT"
 
 
 def _write_fake_backend(tmp_path: Path) -> Path:
-    path = tmp_path / "fake-ai-sh"
+    path = tmp_path / "fake-tmksh"
     script = f"""#!{sys.executable}
 import json
 import os
@@ -221,10 +221,10 @@ raise SystemExit(status)
 
 
 def _line_from_output(output: str) -> str:
-    marker = "__AI_SH_LINE__="
+    marker = "__TMKSH_LINE__="
     return output.split(marker, 1)[1].splitlines()[0]
 
 
 def _point_from_output(output: str) -> int:
-    marker = "__AI_SH_POINT__="
+    marker = "__TMKSH_POINT__="
     return int(output.split(marker, 1)[1].splitlines()[0])

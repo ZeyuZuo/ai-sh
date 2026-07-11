@@ -1,16 +1,18 @@
 import pytest
 from click.testing import CliRunner
 
-from ai_sh.cli import _read_stdin_if_piped, _run_legacy_once, ai, ai_sh
-from ai_sh.protocol import MAX_STDIN_CONTEXT_CHARS
-from ai_sh.executor import ExecutionResult
-from ai_sh.history import Conversation, HistoryStore
-from ai_sh.llm import AssistantResult
-from ai_sh.suggestion import Suggestion
+from tmksh.cli import _read_stdin_if_piped, _run_legacy_once, tmksh
+from tmksh.protocol import MAX_STDIN_CONTEXT_CHARS
+from tmksh.executor import ExecutionResult
+from tmksh.history import Conversation, HistoryStore
+from tmksh.llm import AssistantResult
+from tmksh.suggestion import Suggestion
 
 
 @pytest.mark.parametrize("risk_level", ["safe", "caution"])
-def test_ai_never_executes_or_prompts(monkeypatch, tmp_path, risk_level: str) -> None:
+def test_tmksh_never_executes_or_prompts(
+    monkeypatch, tmp_path, risk_level: str
+) -> None:
     history_path = tmp_path / "history.json"
     result = AssistantResult(
         command="rm -rf ./build" if risk_level == "caution" else "printf ok",
@@ -18,13 +20,13 @@ def test_ai_never_executes_or_prompts(monkeypatch, tmp_path, risk_level: str) ->
         risk_level=risk_level,
         risk_reason="会删除文件。" if risk_level == "caution" else "",
     )
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: _suggestion(tmp_path, result),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.HistoryStore",
+        "tmksh.cli.HistoryStore",
         lambda limit: HistoryStore(history_path, limit=limit),
     )
 
@@ -38,10 +40,10 @@ def test_ai_never_executes_or_prompts(monkeypatch, tmp_path, risk_level: str) ->
         called["prompt"] = True
         return "y"
 
-    monkeypatch.setattr("ai_sh.cli.execute_command", fake_execute)
-    monkeypatch.setattr("ai_sh.cli.prompt_confirm", fake_prompt)
+    monkeypatch.setattr("tmksh.cli.execute_command", fake_execute)
+    monkeypatch.setattr("tmksh.cli.prompt_confirm", fake_prompt)
 
-    invocation = CliRunner().invoke(ai, ["suggest", "something"])
+    invocation = CliRunner().invoke(tmksh, ["suggest something"])
 
     assert invocation.exit_code == 0
     assert called == {"execute": False, "prompt": False}
@@ -50,35 +52,35 @@ def test_ai_never_executes_or_prompts(monkeypatch, tmp_path, risk_level: str) ->
     assert entries[-1].executed is False
 
 
-def test_ai_renders_block_without_executing(monkeypatch, tmp_path) -> None:
+def test_tmksh_renders_block_without_executing(monkeypatch, tmp_path) -> None:
     blocked = AssistantResult(
         kind="blocked",
         risk_level="danger",
         risk_reason="删除根目录",
     )
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: _suggestion(tmp_path, blocked),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.execute_command",
-        lambda command: pytest.fail("default ai must never execute"),
+        "tmksh.cli.execute_command",
+        lambda command: pytest.fail("default tmksh must never execute"),
     )
 
-    invocation = CliRunner().invoke(ai, ["delete", "everything"])
+    invocation = CliRunner().invoke(tmksh, ["delete", "everything"])
 
     assert invocation.exit_code == 0
     assert "已拦截危险命令" in invocation.output
 
 
-def test_ai_dry_run_is_compatible_and_still_never_executes(
+def test_tmksh_dry_run_is_compatible_and_still_never_executes(
     monkeypatch, tmp_path
 ) -> None:
     history_path = tmp_path / "history.json"
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: _suggestion(
             tmp_path,
             AssistantResult(
@@ -87,41 +89,41 @@ def test_ai_dry_run_is_compatible_and_still_never_executes(
         ),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.execute_command",
-        lambda command: pytest.fail("default ai must never execute"),
+        "tmksh.cli.execute_command",
+        lambda command: pytest.fail("default tmksh must never execute"),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.HistoryStore",
+        "tmksh.cli.HistoryStore",
         lambda limit: HistoryStore(history_path, limit=limit),
     )
 
-    invocation = CliRunner().invoke(ai, ["--dry-run", "say", "hello"])
+    invocation = CliRunner().invoke(tmksh, ["--dry-run", "say", "hello"])
 
     assert invocation.exit_code == 0
     assert "建议命令（未执行）" in invocation.output
 
 
-def test_ai_ask_returns_plain_text_for_piped_diff(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+def test_tmksh_ask_returns_plain_text_for_piped_diff(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     captured = {}
 
     def fake_answer(config, question, **kwargs):
         captured.update(question=question, **kwargs)
         return "修改了命令行入口。"
 
-    monkeypatch.setattr("ai_sh.cli.create_answer", fake_answer)
+    monkeypatch.setattr("tmksh.cli.create_answer", fake_answer)
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: pytest.fail("ask must not generate a command"),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.HistoryStore",
+        "tmksh.cli.HistoryStore",
         lambda *args, **kwargs: pytest.fail("ask must not access history"),
     )
 
     invocation = CliRunner().invoke(
-        ai,
-        ["--ask", "总结这些修改"],
+        tmksh,
+        ["ask", "总结这些修改"],
         input="diff --git a/src/cli.py b/src/cli.py\n",
     )
 
@@ -132,32 +134,32 @@ def test_ai_ask_returns_plain_text_for_piped_diff(monkeypatch, tmp_path) -> None
     assert captured["stdin_truncated"] is False
 
 
-def test_ai_ask_supports_question_without_stdin(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
-    monkeypatch.setattr("ai_sh.cli.sys.stdin.isatty", lambda: True)
+def test_tmksh_ask_supports_question_without_stdin(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(
-        "ai_sh.cli.create_answer",
+        "tmksh.cli.create_answer",
         lambda config, question, **kwargs: "Git rebase 会重写提交历史。",
     )
 
-    invocation = CliRunner().invoke(ai, ["--ask", "什么是 git rebase？"])
+    invocation = CliRunner().invoke(tmksh, ["ask", "什么是 git rebase？"])
 
     assert invocation.exit_code == 0
     assert invocation.output == "Git rebase 会重写提交历史。\n"
 
 
-def test_ai_ask_failure_is_nonzero_and_understandable(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
-    monkeypatch.setattr("ai_sh.cli.sys.stdin.isatty", lambda: True)
+def test_tmksh_ask_failure_is_nonzero_and_understandable(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.sys.stdin.isatty", lambda: True)
 
     def fail(*args, **kwargs):
-        from ai_sh.exceptions import ApiError
+        from tmksh.exceptions import ApiError
 
         raise ApiError("服务暂时不可用，credential=test-key")
 
-    monkeypatch.setattr("ai_sh.cli.create_answer", fail)
+    monkeypatch.setattr("tmksh.cli.create_answer", fail)
 
-    invocation = CliRunner().invoke(ai, ["--ask", "分析报错"])
+    invocation = CliRunner().invoke(tmksh, ["ask", "分析报错"])
 
     assert invocation.exit_code == 1
     assert "错误：服务暂时不可用" in invocation.output
@@ -165,21 +167,21 @@ def test_ai_ask_failure_is_nonzero_and_understandable(monkeypatch, tmp_path) -> 
     assert "[redacted]" in invocation.output
 
 
-def test_ai_ask_reports_truncated_log_input(monkeypatch, tmp_path) -> None:
-    from ai_sh.answer import MAX_ASK_STDIN_BYTES
+def test_tmksh_ask_reports_truncated_log_input(monkeypatch, tmp_path) -> None:
+    from tmksh.answer import MAX_ASK_STDIN_BYTES
 
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     captured = {}
 
     def fake_answer(config, question, **kwargs):
         captured.update(kwargs)
         return "日志分析完成。"
 
-    monkeypatch.setattr("ai_sh.cli.create_answer", fake_answer)
+    monkeypatch.setattr("tmksh.cli.create_answer", fake_answer)
 
     invocation = CliRunner().invoke(
-        ai,
-        ["--ask", "分析日志"],
+        tmksh,
+        ["ask", "分析日志"],
         input="E" * (MAX_ASK_STDIN_BYTES + 1),
     )
 
@@ -190,18 +192,20 @@ def test_ai_ask_reports_truncated_log_input(monkeypatch, tmp_path) -> None:
     assert captured["stdin_truncated"] is True
 
 
-def test_ai_ask_rejects_json_combination() -> None:
-    invocation = CliRunner().invoke(ai, ["--ask", "--json", "回答问题"])
+def test_tmksh_ask_rejects_command_options() -> None:
+    invocation = CliRunner().invoke(tmksh, ["ask", "--json", "回答问题"])
 
     assert invocation.exit_code == 2
-    assert "--ask 不能与 --json 同时使用" in invocation.output
+    assert "No such option '--json'" in invocation.output
 
 
-def test_ai_sh_without_subcommand_shows_legacy_guidance() -> None:
-    invocation = CliRunner().invoke(ai_sh)
+def test_tmksh_without_subcommand_shows_unified_help() -> None:
+    invocation = CliRunner().invoke(tmksh)
 
     assert invocation.exit_code == 0
-    assert "ai-sh repl" in invocation.output
+    assert "Commands:" in invocation.output
+    assert "ask" in invocation.output
+    assert "config" in invocation.output
     assert "REPL 已启动" not in invocation.output
 
 
@@ -214,7 +218,7 @@ def test_piped_stdin_is_read_with_a_limit(monkeypatch) -> None:
             assert size == MAX_STDIN_CONTEXT_CHARS + 1
             return "x" * size
 
-    monkeypatch.setattr("ai_sh.cli.sys.stdin", LargeStdin())
+    monkeypatch.setattr("tmksh.cli.sys.stdin", LargeStdin())
 
     value = _read_stdin_if_piped()
 
@@ -222,13 +226,13 @@ def test_piped_stdin_is_read_with_a_limit(monkeypatch) -> None:
     assert value.endswith("...[truncated]")
 
 
-def test_ai_sh_config_writes_settings(tmp_path, monkeypatch) -> None:
+def test_tmksh_config_writes_settings(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
-    monkeypatch.setattr("ai_sh.cli.write_config", _write_config_to(config_path))
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.write_config", _write_config_to(config_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
 
     invocation = CliRunner().invoke(
-        ai_sh,
+        tmksh,
         [
             "config",
             "--base-url",
@@ -244,10 +248,10 @@ def test_ai_sh_config_writes_settings(tmp_path, monkeypatch) -> None:
     assert "配置已保存" in invocation.output
 
 
-def test_ai_sh_config_show_redacts_api_key(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+def test_tmksh_config_show_redacts_api_key(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
 
-    invocation = CliRunner().invoke(ai_sh, ["config", "--show"])
+    invocation = CliRunner().invoke(tmksh, ["config", "--show"])
 
     assert invocation.exit_code == 0
     assert "api_key: configured" in invocation.output
@@ -266,11 +270,11 @@ def test_legacy_repl_path_can_execute_and_keeps_conversation(
         risk_level="safe",
     )
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: _suggestion(tmp_path, result),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.execute_command",
+        "tmksh.cli.execute_command",
         lambda command: ExecutionResult(command, 0, "done", ""),
     )
 
@@ -293,11 +297,11 @@ def test_legacy_repl_dry_run_does_not_execute(monkeypatch, tmp_path) -> None:
         command="printf no", explanation="prints", risk_level="safe"
     )
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: _suggestion(tmp_path, result),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.execute_command",
+        "tmksh.cli.execute_command",
         lambda command: pytest.fail("legacy dry-run must not execute"),
     )
 
@@ -317,7 +321,7 @@ def _suggestion(tmp_path, result: AssistantResult) -> Suggestion:
 
 
 def _config(tmp_path, default_confirm="n"):
-    from ai_sh.config import ApiConfig, BehaviorConfig, Config, SafetyConfig
+    from tmksh.config import ApiConfig, BehaviorConfig, Config, SafetyConfig
 
     return Config(
         api=ApiConfig(api_key="test-key"),
@@ -330,7 +334,7 @@ def _config(tmp_path, default_confirm="n"):
 
 
 def _write_config_to(config_path):
-    from ai_sh.config import write_config as real_write_config
+    from tmksh.config import write_config as real_write_config
 
     def write_to_temp(**kwargs):
         kwargs["path"] = config_path

@@ -1,4 +1,4 @@
-from ai_sh import context
+from tmksh import context
 
 
 def test_collect_context_uses_safe_detectors(monkeypatch) -> None:

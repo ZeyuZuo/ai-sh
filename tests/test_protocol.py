@@ -4,11 +4,11 @@ from io import BytesIO
 import pytest
 from click.testing import CliRunner
 
-from ai_sh.cli import ai, ai_sh
-from ai_sh.config import ApiConfig, BehaviorConfig, Config
-from ai_sh.exceptions import ApiError, ConfigError
-from ai_sh.llm import AssistantResult
-from ai_sh.protocol import (
+from tmksh.cli import tmksh
+from tmksh.config import ApiConfig, BehaviorConfig, Config
+from tmksh.exceptions import ApiError, ConfigError
+from tmksh.llm import AssistantResult
+from tmksh.protocol import (
     MAX_BUFFER_CHARS,
     MAX_PROTOCOL_INPUT_BYTES,
     MAX_REQUEST_CHARS,
@@ -18,7 +18,7 @@ from ai_sh.protocol import (
     read_nul_protocol_request,
     read_protocol_request,
 )
-from ai_sh.suggestion import Suggestion
+from tmksh.suggestion import Suggestion
 
 
 def test_suggest_protocol_round_trips_special_characters(monkeypatch, tmp_path) -> None:
@@ -26,7 +26,7 @@ def test_suggest_protocol_round_trips_special_characters(monkeypatch, tmp_path) 
     buffer = "printf '%s\\n' \"雪 | $HOME\"\n"
     command = "rg 'a\\|b' \"$HOME/雪\" | head -n 5"
     captured: dict[str, str] = {}
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
 
     def fake_create(config, received_request, *, current_command="", **kwargs):
         captured["request"] = received_request
@@ -40,7 +40,7 @@ def test_suggest_protocol_round_trips_special_characters(monkeypatch, tmp_path) 
             environment={"cwd": str(tmp_path)},
         )
 
-    monkeypatch.setattr("ai_sh.cli.create_suggestion", fake_create)
+    monkeypatch.setattr("tmksh.cli.create_suggestion", fake_create)
 
     invocation = _invoke_suggest(request=request, buffer=buffer)
 
@@ -61,10 +61,12 @@ def test_suggest_protocol_round_trips_special_characters(monkeypatch, tmp_path) 
     }
 
 
-def test_ai_json_uses_protocol_output_without_executing(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+def test_tmksh_json_uses_protocol_output_without_executing(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: Suggestion(
             AssistantResult(
                 command="git status --short",
@@ -75,11 +77,11 @@ def test_ai_json_uses_protocol_output_without_executing(monkeypatch, tmp_path) -
         ),
     )
     monkeypatch.setattr(
-        "ai_sh.cli.execute_command",
-        lambda command: pytest.fail("ai --json must never execute"),
+        "tmksh.cli.execute_command",
+        lambda command: pytest.fail("tmksh --json must never execute"),
     )
 
-    invocation = CliRunner().invoke(ai, ["--json", "查看", "状态"])
+    invocation = CliRunner().invoke(tmksh, ["--json", "查看", "状态"])
 
     assert invocation.exit_code == ProtocolExitCode.SUCCESS
     assert invocation.stderr == ""
@@ -88,14 +90,14 @@ def test_ai_json_uses_protocol_output_without_executing(monkeypatch, tmp_path) -
     assert response["command"] == "git status --short"
 
 
-def test_ai_json_applies_request_limit_before_loading_config(monkeypatch) -> None:
+def test_tmksh_json_applies_request_limit_before_loading_config(monkeypatch) -> None:
     monkeypatch.setattr(
-        "ai_sh.cli.load_config",
+        "tmksh.cli.load_config",
         lambda: pytest.fail("invalid request must be rejected before config loading"),
     )
 
     invocation = CliRunner().invoke(
-        ai,
+        tmksh,
         ["--json", "x" * (MAX_REQUEST_CHARS + 1)],
     )
 
@@ -125,9 +127,9 @@ def test_ai_json_applies_request_limit_before_loading_config(monkeypatch) -> Non
 def test_suggest_protocol_uses_result_exit_codes(
     monkeypatch, tmp_path, assistant_result, expected_exit
 ) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: Suggestion(assistant_result, {"cwd": str(tmp_path)}),
     )
 
@@ -142,13 +144,13 @@ def test_suggest_protocol_uses_result_exit_codes(
 def test_suggest_protocol_applies_local_safety_before_response(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.suggestion.collect_context",
+        "tmksh.suggestion.collect_context",
         lambda recent_commands=None: {"cwd": str(tmp_path)},
     )
     monkeypatch.setattr(
-        "ai_sh.suggestion.generate_command",
+        "tmksh.suggestion.generate_command",
         lambda config, messages: AssistantResult(
             command="rm -rf /",
             explanation="incorrectly classified",
@@ -167,7 +169,7 @@ def test_suggest_protocol_applies_local_safety_before_response(
 
 def test_suggest_protocol_returns_config_error_json(monkeypatch) -> None:
     monkeypatch.setattr(
-        "ai_sh.cli.load_config",
+        "tmksh.cli.load_config",
         lambda: (_ for _ in ()).throw(ConfigError("缺少配置。")),
     )
 
@@ -183,10 +185,10 @@ def test_suggest_protocol_redacts_api_key_from_api_errors(
 ) -> None:
     secret = "super-secret-api-key"
     monkeypatch.setattr(
-        "ai_sh.cli.load_config", lambda: _config(tmp_path, api_key=secret)
+        "tmksh.cli.load_config", lambda: _config(tmp_path, api_key=secret)
     )
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             ApiError(f"Bearer {secret}; api_key={secret}")
         ),
@@ -205,9 +207,9 @@ def test_suggest_protocol_redacts_api_key_from_api_errors(
 def test_suggest_protocol_hides_unexpected_exception_details(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             RuntimeError("sensitive implementation detail")
         ),
@@ -217,14 +219,14 @@ def test_suggest_protocol_hides_unexpected_exception_details(
 
     assert invocation.exit_code == ProtocolExitCode.INTERNAL_ERROR
     response = json.loads(invocation.stdout)
-    assert response["error"] == "ai-sh 内部错误。"
+    assert response["error"] == "tmksh 内部错误。"
     assert "sensitive" not in invocation.stdout
 
 
 def test_suggest_protocol_returns_json_when_interrupted(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
-        "ai_sh.cli.create_suggestion",
+        "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
     )
 
@@ -254,7 +256,7 @@ def test_suggest_protocol_returns_json_when_interrupted(monkeypatch, tmp_path) -
     ],
 )
 def test_suggest_protocol_rejects_invalid_requests_as_json(payload: str) -> None:
-    invocation = CliRunner().invoke(ai_sh, ["suggest"], input=payload)
+    invocation = CliRunner().invoke(tmksh, ["suggest"], input=payload)
 
     assert invocation.exit_code == ProtocolExitCode.INVALID_REQUEST
     response = json.loads(invocation.stdout)
@@ -270,7 +272,7 @@ def test_protocol_input_has_total_byte_limit() -> None:
 
 def test_suggest_protocol_reports_total_byte_limit_as_json() -> None:
     invocation = CliRunner().invoke(
-        ai_sh,
+        tmksh,
         ["suggest"],
         input="x" * (MAX_PROTOCOL_INPUT_BYTES + 1),
     )
@@ -304,7 +306,7 @@ def test_nul_protocol_requires_exactly_two_fields() -> None:
 
 def test_suggest_cli_accepts_nul_transport(monkeypatch, tmp_path) -> None:
     captured: dict[str, str] = {}
-    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
 
     def fake_create(config, request, *, current_command="", **kwargs):
         captured.update(request=request, buffer=current_command)
@@ -317,10 +319,10 @@ def test_suggest_cli_accepts_nul_transport(monkeypatch, tmp_path) -> None:
             {"cwd": str(tmp_path)},
         )
 
-    monkeypatch.setattr("ai_sh.cli.create_suggestion", fake_create)
+    monkeypatch.setattr("tmksh.cli.create_suggestion", fake_create)
 
     invocation = CliRunner().invoke(
-        ai_sh,
+        tmksh,
         ["suggest", "--input-format", "nul"],
         input="按时间排序\0find src -type f",
     )
@@ -339,7 +341,7 @@ def _invoke_suggest(*, request: str = "列出文件", buffer: str = ""):
         },
         ensure_ascii=False,
     )
-    return CliRunner().invoke(ai_sh, ["suggest"], input=payload)
+    return CliRunner().invoke(tmksh, ["suggest"], input=payload)
 
 
 def _config(tmp_path, *, api_key: str = "test-key") -> Config:

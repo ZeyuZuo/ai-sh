@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 
-from ai_sh.exceptions import ExecutionError
+from tmksh.exceptions import ExecutionError
 
 
 @dataclass(frozen=True)

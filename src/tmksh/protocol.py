@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from enum import IntEnum
 from typing import BinaryIO
 
-from ai_sh.llm import AssistantResult, ResultKind, RiskLevel
+from tmksh.llm import AssistantResult, ResultKind, RiskLevel
 
 PROTOCOL_VERSION = 1
 MAX_PROTOCOL_INPUT_BYTES = 128 * 1024

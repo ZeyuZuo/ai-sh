@@ -1,6 +1,6 @@
 from io import BytesIO
 
-from ai_sh.answer import MAX_ASK_STDIN_BYTES, create_answer, read_limited_stdin
+from tmksh.answer import MAX_ASK_STDIN_BYTES, create_answer, read_limited_stdin
 
 
 def test_read_limited_stdin_preserves_small_utf8_input() -> None:
@@ -21,7 +21,7 @@ def test_read_limited_stdin_stops_at_byte_limit() -> None:
 
 
 def test_create_answer_uses_separate_answer_call(monkeypatch, tmp_path) -> None:
-    from ai_sh.config import ApiConfig, BehaviorConfig, Config, SafetyConfig
+    from tmksh.config import ApiConfig, BehaviorConfig, Config, SafetyConfig
 
     config = Config(
         api=ApiConfig(api_key="test-key"),
@@ -36,7 +36,7 @@ def test_create_answer_uses_separate_answer_call(monkeypatch, tmp_path) -> None:
         captured["messages"] = messages
         return "分析结果"
 
-    monkeypatch.setattr("ai_sh.answer.generate_answer", fake_generate)
+    monkeypatch.setattr("tmksh.answer.generate_answer", fake_generate)
 
     answer = create_answer(
         config,

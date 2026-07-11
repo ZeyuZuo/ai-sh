@@ -1,4 +1,4 @@
-from ai_sh.safety import check_command
+from tmksh.safety import check_command
 
 
 def test_blocks_required_hard_patterns() -> None:

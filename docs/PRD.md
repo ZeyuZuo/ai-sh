@@ -1,4 +1,4 @@
-# PRD — ai-sh：自然语言命令行助手
+# PRD — tmksh：自然语言命令行助手
 
 **版本** 0.1  
 **状态** 草稿  
@@ -18,7 +18,7 @@
 
 ### 1.2 产品目标
 
-构建一个命令行工具 `ai-sh`，让用户用自然语言描述意图，AI 翻译成可执行的 shell 命令，并在用户确认后在原终端执行。全程不离开命令行环境。
+构建一个命令行工具 `tmksh`，让用户用自然语言描述意图，AI 翻译成可执行的 shell 命令，并在用户确认后在原终端执行。全程不离开命令行环境。
 
 ### 1.3 不在范围内（v0.1）
 
@@ -45,7 +45,7 @@
 ### 场景 A：单次查询（最高频）
 
 ```
-$ ai "找出当前目录下超过 100MB 的文件"
+$ tmksh "找出当前目录下超过 100MB 的文件"
 ```
 
 用户得到命令、解释和风险等级，选择执行或取消。
@@ -53,10 +53,10 @@ $ ai "找出当前目录下超过 100MB 的文件"
 ### 场景 B：REPL 连续对话
 
 ```
-$ ai-sh
-ai> 找出最近一天修改的 python 文件
-ai> 把刚才的结果只保留 src/ 目录下的
-ai> 用 wc -l 统计一下行数
+$ tmksh
+tmksh> 找出最近一天修改的 python 文件
+tmksh> 把刚才的结果只保留 src/ 目录下的
+tmksh> 用 wc -l 统计一下行数
 ```
 
 用户在一个会话里追问，AI 保持上下文，理解「刚才」「上一步」这类指代。
@@ -64,8 +64,8 @@ ai> 用 wc -l 统计一下行数
 ### 场景 C：管道输入
 
 ```
-$ git diff | ai "帮我总结这次改动"
-$ cat error.log | ai "这个报错是什么意思，怎么修"
+$ git diff | tmksh ask "帮我总结这次改动"
+$ cat error.log | tmksh ask "这个报错是什么意思，怎么修"
 ```
 
 从 stdin 读取内容作为上下文附加到请求中。
@@ -73,8 +73,8 @@ $ cat error.log | ai "这个报错是什么意思，怎么修"
 ### 场景 D：撤销 / 追问
 
 ```
-ai> 刚才那个命令加上 --dry-run 参数
-ai> 改成递归处理子目录
+tmksh> 刚才那个命令加上 --dry-run 参数
+tmksh> 改成递归处理子目录
 ```
 
 基于上一条命令的修改，不需要重新描述整个意图。
@@ -141,12 +141,12 @@ ai> 改成递归处理子目录
 
 - REPL 模式下维护完整对话历史，支持追问和修改
 - 执行结果（stdout / stderr 的摘要）回写入对话历史，让后续追问更准确
-- 命令历史持久化到本地（`~/.ai-sh/history.json`），重启后可复用
-- 单次模式（`ai "..."`）不维护跨调用历史，每次独立
+- 命令历史持久化到本地（`~/.tmksh/history.json`），重启后可复用
+- 单次模式（`tmksh "..."`）不维护跨调用历史，每次独立
 
 ### 4.6 配置
 
-通过 `ai-sh config` 写入 `~/.ai-sh/config.toml` 配置：
+通过 `tmksh config` 写入 `~/.tmksh/config.toml` 配置：
 
 ```toml
 [api]
@@ -169,12 +169,12 @@ hard_block_enabled = true   # 本地正则拦截开关（建议保持 true）
 配置命令：
 
 ```bash
-ai-sh config
-ai-sh config --show
-ai-sh config --base-url "https://api.siliconflow.cn/v1" --model "deepseek-ai/DeepSeek-V3.2" --api-key "..."
+tmksh config
+tmksh config --show
+tmksh config --base-url "https://api.siliconflow.cn/v1" --model "deepseek-ai/DeepSeek-V3.2" --api-key "..."
 ```
 
-未配置 `base_url`、`model` 或 `api_key` 时，命令应提示用户运行 `ai-sh config`。
+未配置 `base_url`、`model` 或 `api_key` 时，命令应提示用户运行 `tmksh config`。
 
 ---
 

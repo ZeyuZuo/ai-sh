@@ -1,7 +1,7 @@
 import pytest
 
-from ai_sh.llm import AssistantResult
-from ai_sh.suggestion import normalize_result
+from tmksh.llm import AssistantResult
+from tmksh.suggestion import normalize_result
 
 
 @pytest.mark.parametrize("risk_level", ["safe", "caution"])

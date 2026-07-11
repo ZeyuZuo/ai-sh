@@ -1,22 +1,24 @@
-"""Read and write ai-sh configuration."""
+"""Read and write tmksh configuration."""
 
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from ai_sh.exceptions import ConfigError
+from tmksh.exceptions import ConfigError
 
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - only exercised on Python 3.10
     import tomli as tomllib
 
-CONFIG_DIR = Path.home() / ".ai-sh"
+CONFIG_DIR = Path.home() / ".tmksh"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
+LEGACY_CONFIG_DIR = Path.home() / ".ai-sh"
 DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
 DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2"
 API_KEY_ENV = "SILICONFLOW_API"
@@ -50,7 +52,7 @@ class SafetyConfig:
 
 @dataclass(frozen=True)
 class Config:
-    """Complete ai-sh configuration."""
+    """Complete tmksh configuration."""
 
     api: ApiConfig = ApiConfig()
     behavior: BehaviorConfig = BehaviorConfig()
@@ -60,6 +62,9 @@ class Config:
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
     """Load configuration, applying defaults and environment overrides."""
+
+    if path == CONFIG_PATH:
+        migrate_legacy_state()
 
     data: dict[str, object] = {}
     if path.exists():
@@ -102,6 +107,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 def ensure_default_config(path: Path = CONFIG_PATH) -> Path:
     """Create a default config file if it does not exist."""
 
+    if path == CONFIG_PATH:
+        migrate_legacy_state()
     if path.exists():
         return path
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -122,6 +129,32 @@ hard_block_enabled = true
     path.write_text(content, encoding="utf-8")
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return path
+
+
+def migrate_legacy_state(
+    legacy_dir: Path = LEGACY_CONFIG_DIR,
+    target_dir: Path = CONFIG_DIR,
+) -> tuple[str, ...]:
+    """Copy legacy local state into the tmksh directory without overwriting files."""
+
+    if not legacy_dir.is_dir() or legacy_dir.is_symlink():
+        return ()
+
+    migrated: list[str] = []
+    for name in ("config.toml", ".env", "history.json", "repl.txt"):
+        source = legacy_dir / name
+        target = target_dir / name
+        if not source.is_file() or source.is_symlink() or target.exists():
+            continue
+        try:
+            target_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target_dir.chmod(stat.S_IRWXU)
+            shutil.copyfile(source, target)
+            target.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except OSError as exc:
+            raise ConfigError(f"无法迁移旧配置文件：{source}") from exc
+        migrated.append(name)
+    return tuple(migrated)
 
 
 def write_config(
@@ -171,7 +204,7 @@ def require_api_key(config: Config) -> str:
     if config.api.api_key:
         return config.api.api_key
     raise ConfigError(
-        "未配置 API Key。请运行 `ai-sh config` 写入 base_url、model 和 api_key，"
+        "未配置 API Key。请运行 `tmksh config` 写入 base_url、model 和 api_key，"
         "或 export SILICONFLOW_API。"
     )
 
@@ -180,9 +213,9 @@ def validate_api_config(config: Config) -> None:
     """Validate that base URL, model, and API key are usable."""
 
     if not config.api.base_url.strip():
-        raise ConfigError("未配置 base_url。请运行 `ai-sh config`。")
+        raise ConfigError("未配置 base_url。请运行 `tmksh config`。")
     if not config.api.model.strip():
-        raise ConfigError("未配置 model。请运行 `ai-sh config`。")
+        raise ConfigError("未配置 model。请运行 `tmksh config`。")
     require_api_key(config)
 
 

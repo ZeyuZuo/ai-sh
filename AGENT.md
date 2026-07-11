@@ -1,4 +1,4 @@
-# AGENT.md — ai-sh 开发规范与实现注意事项
+# AGENT.md — tmksh 开发规范与实现注意事项
 
 本文档面向 AI 编码助手（Claude Code、Cursor、Copilot 等）。在开始编写任何代码之前，请完整阅读本文件。
 
@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-`ai-sh` 是一个 Python 命令行工具，让用户用自然语言描述意图，由 AI 生成经过本地安全检查的 shell 命令建议。详细需求见 `PRD.md` 和 v0.2 方案文档。
+`tmksh` 是一个 Python 命令行工具，让用户用自然语言描述意图，由 AI 生成经过本地安全检查的 shell 命令建议。详细需求见 `PRD.md` 和 v0.2 方案文档。
 
 > **v0.2 开发方向（2026-07-11）：** 项目已决定改为 Shell 原生的命令输入助手。AI 只把建议命令写入当前 Shell 的输入缓冲区，永不自动执行；独立 REPL 降级为 legacy 功能；管道问答与命令生成分离。目标交互、技术边界、迁移策略和实施顺序见 [`docs/SHELL_NATIVE_PLAN.md`](docs/SHELL_NATIVE_PLAN.md)。进行 v0.2 开发时，该文档优先于本文和 `docs/PRD.md` 中描述 v0.1 产品形态的内容。
 
@@ -23,7 +23,7 @@
 | 交互输入 | `prompt_toolkit` | REPL 模式的行编辑、历史、补全 |
 | 配置 | `tomllib`（标准库）+ 手动写入 | 读配置用标准库，写配置用字符串拼接 |
 | 包管理 | `uv` | 依赖、虚拟环境、运行命令均优先使用 `uv` |
-| 打包 | `pyproject.toml` + `hatchling` | 支持 `uv build` 和 `pip install ai-sh` |
+| 打包 | `pyproject.toml` + `hatchling` | 支持 `uv build` 和 `pip install tmksh` |
 
 ---
 
@@ -39,7 +39,7 @@
 - `model`: `deepseek-ai/DeepSeek-V3.2`
 - `api_key`: 优先读取环境变量 `SILICONFLOW_API`
 
-用户应优先通过 `ai-sh config` 写入 `~/.ai-sh/config.toml`。运行时缺少 `base_url`、`model` 或 `api_key` 时必须提示用户执行 `ai-sh config`，不要静默使用不可见的硬编码配置。
+用户应优先通过 `tmksh config` 写入 `~/.tmksh/config.toml`。运行时缺少 `base_url`、`model` 或 `api_key` 时必须提示用户执行 `tmksh config`，不要静默使用不可见的硬编码配置。
 
 ```python
 import os
@@ -78,11 +78,11 @@ response = client.chat.completions.create(
 ## 项目结构约定
 
 ```
-ai-sh/
+tmksh/
 ├── src/
-│   └── ai_sh/
+│   └── tmksh/
 │       ├── __init__.py
-│       ├── cli.py          # click 入口，ai 和 ai-sh 两个命令
+│       ├── cli.py          # click 入口，tmksh 单一命令
 │       ├── config.py       # 配置读写，Config dataclass
 │       ├── context.py      # 环境上下文收集
 │       ├── llm.py          # OpenAI SDK 封装，prompt 管理
@@ -103,7 +103,7 @@ ai-sh/
 └── AGENT.md                # 本文件
 ```
 
-- 所有源码放在 `src/ai_sh/` 下，使用 `src` layout
+- 所有源码放在 `src/tmksh/` 下，使用 `src` layout
 - 不在根目录散落 `.py` 文件
 - 测试文件与源文件结构对应，一一映射
 
@@ -194,7 +194,7 @@ HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
 
 ### API Key 保护
 
-- 读取优先级：环境变量 `SILICONFLOW_API` > 配置文件 `~/.ai-sh/config.toml`
+- 读取优先级：环境变量 `SILICONFLOW_API` > 配置文件 `~/.tmksh/config.toml`
 - **任何日志、错误信息、历史记录中不得出现 API Key 的任何部分**
 - 配置文件权限在写入时设置为 `0o600`
 
@@ -207,12 +207,12 @@ HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
 - 使用自定义异常类，不 raise 裸 `Exception`：
 
 ```python
-# 在 ai_sh/exceptions.py 中定义
-class AiShError(Exception): ...
-class ApiError(AiShError): ...
-class ConfigError(AiShError): ...
-class SafetyBlockedError(AiShError): ...
-class ExecutionError(AiShError): ...
+# 在 tmksh/exceptions.py 中定义
+class TmkshError(Exception): ...
+class ApiError(TmkshError): ...
+class ConfigError(TmkshError): ...
+class SafetyBlockedError(TmkshError): ...
+class ExecutionError(TmkshError): ...
 ```
 
 - 网络超时、API 限流（429）要给出明确提示，不让用户盯着光标发呆
@@ -262,8 +262,8 @@ class ExecutionError(AiShError): ...
 2. **安全层**：加入 `safety.py` 和拦截流程
 3. **环境感知**：加入 `context.py`，让命令更准确
 4. **交互 UI**：用 `rich` 美化输出，加入三选项确认
-5. **历史与 REPL**：`history.py` + `ai-sh` 交互模式
-6. **管道输入**：支持 `cat file | ai "..."`
+5. **历史与 REPL**：`history.py` + `tmksh` 交互模式
+6. **管道输入**：支持 `cat file | tmksh "..."`
 7. **打包发布**：完善 `pyproject.toml`，测试 `pip install`
 
 当前用户要求完整交付 v0.1，因此可以在保持模块边界和测试覆盖的前提下完成全部步骤。

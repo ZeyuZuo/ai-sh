@@ -1,4 +1,4 @@
-"""Command-line entry points for ai-sh."""
+"""Command-line entry points for tmksh."""
 
 from __future__ import annotations
 
@@ -9,21 +9,20 @@ import click
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 
-from ai_sh.answer import MAX_ASK_STDIN_BYTES, create_answer, read_limited_stdin
-from ai_sh.config import (
+from tmksh.answer import MAX_ASK_STDIN_BYTES, create_answer, read_limited_stdin
+from tmksh.config import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     Config,
-    ensure_default_config,
     load_config,
     validate_api_config,
     write_config,
 )
-from ai_sh.exceptions import AiShError, ApiError, ConfigError
-from ai_sh.executor import execute_command, summarize_execution
-from ai_sh.history import HISTORY_PATH, Conversation, HistoryStore, new_history_entry
-from ai_sh.llm import AssistantResult, result_to_assistant_message
-from ai_sh.protocol import (
+from tmksh.exceptions import TmkshError, ApiError, ConfigError
+from tmksh.executor import execute_command, summarize_execution
+from tmksh.history import HISTORY_PATH, Conversation, HistoryStore, new_history_entry
+from tmksh.llm import AssistantResult, result_to_assistant_message
+from tmksh.protocol import (
     ProtocolExitCode,
     ProtocolInputError,
     ProtocolResponse,
@@ -34,10 +33,10 @@ from ai_sh.protocol import (
     redact_sensitive,
     validate_protocol_fields,
 )
-from ai_sh.shell import render_bash_init, render_zsh_init
-from ai_sh.shell.prompt import prompt_from_tty
-from ai_sh.suggestion import create_suggestion, normalize_result
-from ai_sh.ui import (
+from tmksh.shell import render_bash_init, render_zsh_init
+from tmksh.shell.prompt import prompt_from_tty
+from tmksh.suggestion import create_suggestion, normalize_result
+from tmksh.ui import (
     console,
     edit_command,
     prompt_confirm,
@@ -47,39 +46,48 @@ from ai_sh.ui import (
 )
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@click.argument("request", nargs=-1)
-@click.option("--init-config", is_flag=True, help="Create ~/.ai-sh/config.toml.")
+class NaturalLanguageGroup(click.Group):
+    """Route unrecognized first arguments to the natural-language command."""
+
+    default_command = "_command"
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if args and args[0] not in self.commands and args[0] not in {"-h", "--help"}:
+            args.insert(0, self.default_command)
+        return super().parse_args(ctx, args)
+
+
+@click.group(
+    cls=NaturalLanguageGroup,
+    invoke_without_command=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+@click.pass_context
+def tmksh(ctx: click.Context) -> None:
+    """Generate shell commands and manage tmksh."""
+
+    if ctx.invoked_subcommand is not None:
+        return
+
+    console.print(ctx.get_help())
+
+
+@tmksh.command("_command", hidden=True)
+@click.argument("request", nargs=-1, required=True)
 @click.option(
     "--dry-run",
     is_flag=True,
     help="Deprecated compatibility flag; suggestions are never executed.",
 )
 @click.option("--json", "json_output", is_flag=True, help="Output protocol JSON.")
-@click.option("--ask", is_flag=True, help="Answer a question, optionally using stdin.")
-def ai(
-    request: tuple[str, ...],
-    init_config: bool,
-    dry_run: bool,
-    json_output: bool,
-    ask: bool,
-) -> None:
-    """Suggest a command, or answer a question with --ask."""
-
-    if init_config:
-        path = ensure_default_config()
-        console.print(f"已创建配置文件：{path}")
-        return
+def command_once(request: tuple[str, ...], dry_run: bool, json_output: bool) -> None:
+    """Suggest one command from a natural-language request."""
 
     user_input = " ".join(request).strip()
     if not user_input:
-        raise click.UsageError("请提供自然语言请求，例如：ai '找出超过 100MB 的文件'")
-
-    if ask:
-        if json_output:
-            raise click.UsageError("--ask 不能与 --json 同时使用。")
-        _run_ask_once(user_input)
-        return
+        raise click.UsageError(
+            "请提供自然语言请求，例如：tmksh '找出超过 100MB 的文件'"
+        )
 
     stdin_context = _read_stdin_if_piped()
     if json_output:
@@ -92,27 +100,15 @@ def ai(
     _run_suggestion_once(user_input, stdin_context=stdin_context)
 
 
-@click.group(
-    invoke_without_command=True,
-    context_settings={"help_option_names": ["-h", "--help"]},
-)
-@click.pass_context
-@click.option("--init-config", is_flag=True, help="Create ~/.ai-sh/config.toml.")
-def ai_sh(ctx: click.Context, init_config: bool) -> None:
-    """Manage ai-sh configuration and shell integration."""
+@tmksh.command("ask", context_settings={"help_option_names": ["-h", "--help"]})
+@click.argument("question", nargs=-1, required=True)
+def ask(question: tuple[str, ...]) -> None:
+    """Answer a question, optionally using stdin as context."""
 
-    if init_config:
-        path = ensure_default_config()
-        console.print(f"已创建配置文件：{path}")
-        return
-    if ctx.invoked_subcommand is not None:
-        return
-
-    console.print(ctx.get_help())
-    console.print("\n运行 `ai-sh repl` 可临时使用旧版 REPL。")
+    _run_ask_once(" ".join(question).strip())
 
 
-@ai_sh.command("repl", context_settings={"help_option_names": ["-h", "--help"]})
+@tmksh.command("repl", context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--dry-run", is_flag=True, help="Generate and inspect without executing.")
 def repl(dry_run: bool) -> None:
     """Start the legacy command-executing REPL."""
@@ -121,7 +117,7 @@ def repl(dry_run: bool) -> None:
         config = load_config()
         validate_api_config(config)
         history = HistoryStore(limit=config.behavior.history_limit)
-    except AiShError as exc:
+    except TmkshError as exc:
         render_error(str(exc))
         raise SystemExit(1) from exc
 
@@ -130,12 +126,12 @@ def repl(dry_run: bool) -> None:
     prompt_history = FileHistory(str(HISTORY_PATH.parent / "repl.txt"))
     session: PromptSession[str] = PromptSession(history=prompt_history)
     console.print(
-        "[bold]ai-sh[/bold] REPL 已启动。输入自然语言请求；输入 exit 或 quit 退出。"
+        "[bold]tmksh[/bold] REPL 已启动。输入自然语言请求；输入 exit 或 quit 退出。"
     )
 
     while True:
         try:
-            user_input = session.prompt("ai> ").strip()
+            user_input = session.prompt("tmksh> ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print()
             return
@@ -153,7 +149,7 @@ def repl(dry_run: bool) -> None:
         )
 
 
-@ai_sh.command("config", context_settings={"help_option_names": ["-h", "--help"]})
+@tmksh.command("config", context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--base-url", help="OpenAI-compatible API base URL.")
 @click.option("--model", help="Model name.")
 @click.option("--api-key", help="API key. If omitted, an interactive prompt is used.")
@@ -190,7 +186,7 @@ def configure(
             language=current.behavior.language,
             hard_block_enabled=current.safety.hard_block_enabled,
         )
-    except AiShError as exc:
+    except TmkshError as exc:
         render_error(str(exc))
         raise SystemExit(1) from exc
 
@@ -198,7 +194,7 @@ def configure(
     console.print("API Key 已写入本地配置文件，文件权限已设置为 600。")
 
 
-@ai_sh.command("suggest", context_settings={"help_option_names": ["-h", "--help"]})
+@tmksh.command("suggest", context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "--input-format",
     type=click.Choice(["json", "nul"]),
@@ -230,7 +226,7 @@ def suggest_machine(input_format: str) -> None:
     _emit_protocol_response(response, exit_code)
 
 
-@ai_sh.group("init", context_settings={"help_option_names": ["-h", "--help"]})
+@tmksh.group("init", context_settings={"help_option_names": ["-h", "--help"]})
 def init_shell() -> None:
     """Generate opt-in shell integration scripts."""
 
@@ -261,8 +257,8 @@ def init_zsh(key_binding: str) -> None:
     click.echo(render_zsh_init(key_binding=key_binding))
 
 
-@ai_sh.command("_prompt", hidden=True)
-@click.option("--label", default="ai> ", help="Prompt label.")
+@tmksh.command("_prompt", hidden=True)
+@click.option("--label", default="tmksh> ", help="Prompt label.")
 def widget_prompt(label: str) -> None:
     """Read one line from the controlling terminal for a shell widget."""
 
@@ -305,7 +301,7 @@ def _machine_suggestion_response(
     except ApiError as exc:
         message = _redact_protocol_error(str(exc), config)
         return ProtocolResponse.error_response(message), ProtocolExitCode.API_ERROR
-    except AiShError as exc:
+    except TmkshError as exc:
         message = _redact_protocol_error(str(exc), config)
         return ProtocolResponse.error_response(message), ProtocolExitCode.INTERNAL_ERROR
     except KeyboardInterrupt:
@@ -315,7 +311,7 @@ def _machine_suggestion_response(
         )
     except Exception:
         return (
-            ProtocolResponse.error_response("ai-sh 内部错误。"),
+            ProtocolResponse.error_response("tmksh 内部错误。"),
             ProtocolExitCode.INTERNAL_ERROR,
         )
 
@@ -349,7 +345,7 @@ def _run_suggestion_once(
             history.append(
                 new_history_entry(user_input, result.command, executed=False)
             )
-    except AiShError as exc:
+    except TmkshError as exc:
         render_error(str(exc))
     except KeyboardInterrupt:
         console.print("\n已取消。")
@@ -379,7 +375,7 @@ def _run_ask_once(question: str, *, config: Config | None = None) -> None:
             stdin_truncated=stdin_truncated,
         )
         click.echo(answer)
-    except AiShError as exc:
+    except TmkshError as exc:
         message = _redact_protocol_error(str(exc), config)
         click.echo(f"错误：{message}", err=True)
         raise SystemExit(1) from exc
@@ -431,7 +427,7 @@ def _run_legacy_once(
             conversation=conversation,
             dry_run=dry_run,
         )
-    except AiShError as exc:
+    except TmkshError as exc:
         render_error(str(exc))
     except KeyboardInterrupt:
         console.print("\n已取消。")
@@ -534,7 +530,7 @@ def _prompt_value(label: str, default: str) -> str:
 def _show_config() -> None:
     try:
         config = load_config()
-    except AiShError as exc:
+    except TmkshError as exc:
         render_error(str(exc))
         raise SystemExit(1) from exc
 
