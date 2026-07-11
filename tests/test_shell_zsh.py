@@ -7,7 +7,7 @@ import pytest
 from click.testing import CliRunner
 
 from tmksh.cli import tmksh
-from tmksh.shell import render_bash_init, render_zsh_init
+from tmksh.shell import render_bash_init, render_fish_init, render_zsh_init
 
 ZSH = shutil.which("zsh")
 
@@ -34,24 +34,33 @@ def test_zsh_init_supports_custom_binding_and_quoted_path() -> None:
     assert "'/opt/tmk sh/bin/tmksh'" in script
 
 
-def test_bash_and_zsh_widgets_share_protocol_and_safety_semantics() -> None:
+def test_shell_widgets_share_protocol_and_safety_semantics() -> None:
     scripts = [
         render_bash_init(command_path="tmksh", python_path="python3"),
         render_zsh_init(command_path="tmksh", python_path="python3"),
+        render_fish_init(command_path="tmksh", python_path="python3"),
     ]
 
     for script in scripts:
         assert "suggest --input-format nul" in script
         assert "printf '%s\\0%s'" in script
-        assert ("status == 0" in script) or ("exit_status == 0" in script)
-        assert ("status == 30" in script) or ("exit_status == 30" in script)
-        assert "attempts < 3" in script
+        assert any(
+            marker in script
+            for marker in ("status == 0", "exit_status == 0", "$exit_status -eq 0")
+        )
+        assert any(
+            marker in script
+            for marker in ("status == 30", "exit_status == 30", "$exit_status -eq 30")
+        )
+        assert ("attempts < 3" in script) or ("$attempts -lt 3" in script)
         assert "risk_reason" in script
         assert "eval " not in script
     assert 'original_point="$READLINE_POINT"' in scripts[0]
     assert 'READLINE_POINT="$original_point"' in scripts[0]
     assert "original_cursor=$CURSOR" in scripts[1]
     assert "CURSOR=$original_cursor" in scripts[1]
+    assert "original_buffer (commandline)" in scripts[2]
+    assert 'commandline --replace "$original_buffer"' in scripts[2]
 
 
 @pytest.mark.skipif(ZSH is None, reason="zsh is not installed")

@@ -29,7 +29,7 @@ from tmksh.protocol import (
     redact_sensitive,
     validate_protocol_fields,
 )
-from tmksh.shell import render_bash_init, render_zsh_init
+from tmksh.shell import render_bash_init, render_fish_init, render_zsh_init
 from tmksh.shell.prompt import prompt_from_tty
 from tmksh.suggestion import create_suggestion
 from tmksh.ui import console, render_error, render_result
@@ -195,6 +195,19 @@ def init_zsh(key_binding: str) -> None:
     """Print the Zsh ZLE widget initialization script."""
 
     click.echo(render_zsh_init(key_binding=key_binding))
+
+
+@init_shell.command("fish", context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "--key-binding",
+    default=r"\cg",
+    show_default=True,
+    help="Fish key sequence.",
+)
+def init_fish(key_binding: str) -> None:
+    """Print the Fish commandline widget initialization script."""
+
+    click.echo(render_fish_init(key_binding=key_binding))
 
 
 @tmksh.command("_prompt", hidden=True)

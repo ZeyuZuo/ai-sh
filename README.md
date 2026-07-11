@@ -48,6 +48,9 @@ eval "$(uv run tmksh init bash)"
 
 # Zsh
 eval "$(uv run tmksh init zsh)"
+
+# Fish
+uv run tmksh init fish | source
 ```
 
 脚本只注册快捷键，不会修改 `.bashrc` 或 `.zshrc`。确认可用后，可由用户自行把对应的 `eval` 行加入 Shell 配置；正式安装后通常不需要其中的 `uv run`。
@@ -163,6 +166,7 @@ $ find src -type f -printf '%T@ %p\n' | sort -nr
 ```bash
 eval "$(tmksh init bash --key-binding '\C-x\C-a')"
 eval "$(tmksh init zsh --key-binding '^X^A')"
+tmksh init fish --key-binding '\cx\ca' | source
 ```
 
 ### CLI
