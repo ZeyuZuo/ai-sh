@@ -151,7 +151,7 @@ tmksh> 改成递归处理子目录
 ```toml
 [api]
 base_url = "https://api.siliconflow.cn/v1"   # 第一版默认 SiliconFlow OpenAI 兼容接口
-model = "deepseek-ai/DeepSeek-V3.2"
+model = "deepseek-ai/DeepSeek-V4-Flash"
 api_key = ""   # 也可通过环境变量 SILICONFLOW_API 覆盖
 
 [behavior]
@@ -171,7 +171,7 @@ hard_block_enabled = true   # 本地正则拦截开关（建议保持 true）
 ```bash
 tmksh config
 tmksh config --show
-tmksh config --base-url "https://api.siliconflow.cn/v1" --model "deepseek-ai/DeepSeek-V3.2" --api-key "..."
+tmksh config --base-url "https://api.siliconflow.cn/v1" --model "deepseek-ai/DeepSeek-V4-Flash" --api-key "..."
 ```
 
 未配置 `base_url`、`model` 或 `api_key` 时，命令应提示用户运行 `tmksh config`。

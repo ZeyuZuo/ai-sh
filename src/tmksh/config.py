@@ -21,7 +21,7 @@ CONFIG_DIR = Path.home() / ".tmksh"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 LEGACY_CONFIG_DIR = Path.home() / ".ai-sh"
 DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1"
-DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2"
+DEFAULT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 API_KEY_ENV = "SILICONFLOW_API"
 
 

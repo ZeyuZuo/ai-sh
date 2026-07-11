@@ -36,7 +36,7 @@
 默认配置：
 
 - `base_url`: `https://api.siliconflow.cn/v1`
-- `model`: `deepseek-ai/DeepSeek-V3.2`
+- `model`: `deepseek-ai/DeepSeek-V4-Flash`
 - `api_key`: 优先读取环境变量 `SILICONFLOW_API`
 
 用户应优先通过 `tmksh config` 写入 `~/.tmksh/config.toml`。运行时缺少 `base_url`、`model` 或 `api_key` 时必须提示用户执行 `tmksh config`，不要静默使用不可见的硬编码配置。
@@ -52,7 +52,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model=config.model,  # 默认 "deepseek-ai/DeepSeek-V3.2"
+    model=config.api.model,  # 默认 "deepseek-ai/DeepSeek-V4-Flash"
     messages=messages,
     response_format={"type": "json_object"},  # 强制 JSON 输出
     temperature=0.2,  # 命令生成场景需要低随机性

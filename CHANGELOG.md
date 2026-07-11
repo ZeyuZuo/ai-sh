@@ -16,6 +16,7 @@
 
 ### Changed
 
+- SiliconFlow 默认模型更新为 `deepseek-ai/DeepSeek-V4-Flash`。
 - 默认产品形态从独立 CLI/REPL 改为 Shell 输入 buffer 助手。
 - 所有命令建议仅展示或写入 buffer，最终由用户在当前 Shell 中执行。
 - 项目、包和公开命令统一命名为 `tmksh`。
