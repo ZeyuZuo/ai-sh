@@ -50,17 +50,16 @@ HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
-def check_command(command: str, *, hard_block_enabled: bool = True) -> SafetyVerdict:
+def check_command(command: str) -> SafetyVerdict:
     """Check a shell command against local hard-block safety patterns."""
 
     normalized = _normalize(command)
-    if hard_block_enabled:
-        rm_reason = _dangerous_rm_reason(command)
-        if rm_reason:
-            return SafetyVerdict("block", rm_reason)
-        for pattern, reason in HARD_BLOCK_PATTERNS:
-            if re.search(pattern, normalized, flags=re.IGNORECASE | re.DOTALL):
-                return SafetyVerdict("block", reason)
+    rm_reason = _dangerous_rm_reason(command)
+    if rm_reason:
+        return SafetyVerdict("block", rm_reason)
+    for pattern, reason in HARD_BLOCK_PATTERNS:
+        if re.search(pattern, normalized, flags=re.IGNORECASE | re.DOTALL):
+            return SafetyVerdict("block", reason)
     return SafetyVerdict("allow")
 
 

@@ -48,12 +48,10 @@ def test_build_messages_includes_context_and_stdin() -> None:
         {"cwd": "/tmp/project", "shell": "bash"},
         stdin_context="diff --git a/file b/file",
         current_command="git diff --stat",
-        conversation=[{"role": "assistant", "content": "previous"}],
         language="zh",
     )
 
     assert messages[0]["role"] == "system"
-    assert messages[-2]["content"] == "previous"
     assert "diff --git" in messages[-1]["content"]
     assert "git diff --stat" in messages[-1]["content"]
     assert "/tmp/project" in messages[-1]["content"]

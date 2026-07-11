@@ -45,9 +45,3 @@ def test_allows_read_only_commands() -> None:
 
     for command in commands:
         assert check_command(command).action == "allow"
-
-
-def test_hard_block_can_be_disabled() -> None:
-    verdict = check_command("rm -rf /", hard_block_enabled=False)
-
-    assert verdict.action == "allow"

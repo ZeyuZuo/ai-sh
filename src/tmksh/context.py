@@ -24,7 +24,7 @@ KEY_TOOLS = [
 ]
 
 
-def collect_context(recent_commands: list[str] | None = None) -> dict[str, object]:
+def collect_context() -> dict[str, object]:
     """Collect shell, OS, user, cwd, tools, and recent command context."""
 
     return {
@@ -33,7 +33,6 @@ def collect_context(recent_commands: list[str] | None = None) -> dict[str, objec
         "os": detect_os(),
         "username": getpass.getuser(),
         "tools": detect_tools(),
-        "recent_commands": recent_commands or [],
     }
 
 

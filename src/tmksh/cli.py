@@ -6,8 +6,6 @@ import sys
 from getpass import getpass
 
 import click
-from prompt_toolkit import PromptSession
-from prompt_toolkit.history import FileHistory
 
 from tmksh.answer import MAX_ASK_STDIN_BYTES, create_answer, read_limited_stdin
 from tmksh.config import (
@@ -19,9 +17,7 @@ from tmksh.config import (
     write_config,
 )
 from tmksh.exceptions import TmkshError, ApiError, ConfigError
-from tmksh.executor import execute_command, summarize_execution
-from tmksh.history import HISTORY_PATH, Conversation, HistoryStore, new_history_entry
-from tmksh.llm import AssistantResult, result_to_assistant_message
+from tmksh.history import HistoryStore, new_history_entry
 from tmksh.protocol import (
     ProtocolExitCode,
     ProtocolInputError,
@@ -35,15 +31,8 @@ from tmksh.protocol import (
 )
 from tmksh.shell import render_bash_init, render_zsh_init
 from tmksh.shell.prompt import prompt_from_tty
-from tmksh.suggestion import create_suggestion, normalize_result
-from tmksh.ui import (
-    console,
-    edit_command,
-    prompt_confirm,
-    render_error,
-    render_execution_result,
-    render_result,
-)
+from tmksh.suggestion import create_suggestion
+from tmksh.ui import console, render_error, render_result
 
 
 class NaturalLanguageGroup(click.Group):
@@ -74,13 +63,8 @@ def tmksh(ctx: click.Context) -> None:
 
 @tmksh.command("_command", hidden=True)
 @click.argument("request", nargs=-1, required=True)
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Deprecated compatibility flag; suggestions are never executed.",
-)
 @click.option("--json", "json_output", is_flag=True, help="Output protocol JSON.")
-def command_once(request: tuple[str, ...], dry_run: bool, json_output: bool) -> None:
+def command_once(request: tuple[str, ...], json_output: bool) -> None:
     """Suggest one command from a natural-language request."""
 
     user_input = " ".join(request).strip()
@@ -106,47 +90,6 @@ def ask(question: tuple[str, ...]) -> None:
     """Answer a question, optionally using stdin as context."""
 
     _run_ask_once(" ".join(question).strip())
-
-
-@tmksh.command("repl", context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--dry-run", is_flag=True, help="Generate and inspect without executing.")
-def repl(dry_run: bool) -> None:
-    """Start the legacy command-executing REPL."""
-
-    try:
-        config = load_config()
-        validate_api_config(config)
-        history = HistoryStore(limit=config.behavior.history_limit)
-    except TmkshError as exc:
-        render_error(str(exc))
-        raise SystemExit(1) from exc
-
-    conversation = Conversation(max_messages=20)
-    HISTORY_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    prompt_history = FileHistory(str(HISTORY_PATH.parent / "repl.txt"))
-    session: PromptSession[str] = PromptSession(history=prompt_history)
-    console.print(
-        "[bold]tmksh[/bold] REPL 已启动。输入自然语言请求；输入 exit 或 quit 退出。"
-    )
-
-    while True:
-        try:
-            user_input = session.prompt("tmksh> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print()
-            return
-        if not user_input:
-            continue
-        if user_input in {"exit", "quit"}:
-            return
-        _run_legacy_once(
-            user_input,
-            stdin_context="",
-            dry_run=dry_run,
-            config=config,
-            history=history,
-            conversation=conversation,
-        )
 
 
 @tmksh.command("config", context_settings={"help_option_names": ["-h", "--help"]})
@@ -180,11 +123,8 @@ def configure(
             base_url=selected_base_url,
             model=selected_model,
             api_key=selected_api_key,
-            default_confirm=current.behavior.default_confirm,
             history_limit=current.behavior.history_limit,
-            context_commands=current.behavior.context_commands,
             language=current.behavior.language,
-            hard_block_enabled=current.safety.hard_block_enabled,
         )
     except TmkshError as exc:
         render_error(str(exc))
@@ -343,7 +283,7 @@ def _run_suggestion_once(
         render_result(result, cwd=str(suggestion.environment.get("cwd", "")))
         if result.kind == "command":
             history.append(
-                new_history_entry(user_input, result.command, executed=False)
+                new_history_entry(user_input, result.command)
             )
     except TmkshError as exc:
         render_error(str(exc))
@@ -382,135 +322,6 @@ def _run_ask_once(question: str, *, config: Config | None = None) -> None:
     except KeyboardInterrupt:
         click.echo("已取消。", err=True)
         raise SystemExit(130) from None
-
-
-def _run_legacy_once(
-    user_input: str,
-    *,
-    stdin_context: str,
-    dry_run: bool,
-    config: Config | None = None,
-    history: HistoryStore | None = None,
-    conversation: Conversation | None = None,
-) -> None:
-    try:
-        config = config or load_config()
-        validate_api_config(config)
-        history = history or HistoryStore(limit=config.behavior.history_limit)
-        recent_commands = (
-            history.recent_commands(config.behavior.context_commands)
-            if conversation
-            else []
-        )
-        suggestion = create_suggestion(
-            config,
-            user_input,
-            stdin_context=stdin_context,
-            conversation=conversation,
-            recent_commands=recent_commands,
-        )
-        result = suggestion.result
-        render_result(result, cwd=str(suggestion.environment.get("cwd", "")))
-        if conversation:
-            conversation.add_user(user_input)
-            conversation.add_assistant(result_to_assistant_message(result)["content"])
-        if result.kind == "blocked":
-            history.append(new_history_entry(user_input, "", executed=False))
-            return
-        if result.kind != "command":
-            return
-        _handle_legacy_result(
-            user_input,
-            result,
-            config=config,
-            history=history,
-            conversation=conversation,
-            dry_run=dry_run,
-        )
-    except TmkshError as exc:
-        render_error(str(exc))
-    except KeyboardInterrupt:
-        console.print("\n已取消。")
-
-
-def _handle_legacy_result(
-    user_input: str,
-    result: AssistantResult,
-    *,
-    config: Config,
-    history: HistoryStore,
-    conversation: Conversation | None,
-    dry_run: bool,
-) -> None:
-    if dry_run:
-        history.append(new_history_entry(user_input, result.command, executed=False))
-        console.print("dry-run：已生成并检查命令，没有执行。")
-        return
-
-    caution = result.risk_level == "caution"
-    if result.risk_level == "safe":
-        console.print("safe：自动执行只读或低风险命令。")
-        _execute_and_record(
-            user_input,
-            result,
-            history=history,
-            conversation=conversation,
-        )
-        return
-
-    if caution and result.risk_reason:
-        console.print(f"[yellow]注意：{result.risk_reason}[/yellow]")
-
-    choice = prompt_confirm(config.behavior.default_confirm, caution=caution)
-    if choice == "n":
-        history.append(new_history_entry(user_input, result.command, executed=False))
-        console.print("已取消，没有执行任何命令。")
-        return
-    if choice == "e":
-        result = edit_command(result)
-        result = normalize_result(result)
-        render_result(result)
-        if result.kind == "blocked":
-            history.append(new_history_entry(user_input, "", executed=False))
-            return
-        confirm_edited = prompt_confirm(
-            "n",
-            caution=result.risk_level == "caution",
-        )
-        if confirm_edited != "y":
-            history.append(
-                new_history_entry(user_input, result.command, executed=False)
-            )
-            console.print("已取消，没有执行任何命令。")
-            return
-
-    _execute_and_record(
-        user_input,
-        result,
-        history=history,
-        conversation=conversation,
-    )
-
-
-def _execute_and_record(
-    user_input: str,
-    result: AssistantResult,
-    *,
-    history: HistoryStore,
-    conversation: Conversation | None,
-) -> None:
-    execution = execute_command(result.command)
-    render_execution_result(execution)
-    history.append(
-        new_history_entry(
-            user_input,
-            result.command,
-            executed=True,
-            exit_code=execution.exit_code,
-        )
-    )
-    if conversation:
-        conversation.add_execution_summary(summarize_execution(execution))
 
 
 def _read_stdin_if_piped() -> str:

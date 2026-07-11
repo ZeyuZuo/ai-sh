@@ -21,12 +21,11 @@ def test_read_limited_stdin_stops_at_byte_limit() -> None:
 
 
 def test_create_answer_uses_separate_answer_call(monkeypatch, tmp_path) -> None:
-    from tmksh.config import ApiConfig, BehaviorConfig, Config, SafetyConfig
+    from tmksh.config import ApiConfig, BehaviorConfig, Config
 
     config = Config(
         api=ApiConfig(api_key="test-key"),
         behavior=BehaviorConfig(language="zh"),
-        safety=SafetyConfig(),
         path=tmp_path / "config.toml",
     )
     captured = {}

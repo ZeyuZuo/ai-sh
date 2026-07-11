@@ -12,13 +12,12 @@ def test_collect_context_uses_safe_detectors(monkeypatch) -> None:
     monkeypatch.setattr(context.getpass, "getuser", lambda: "tester")
     monkeypatch.setattr(context, "detect_tools", lambda: {"git": True})
 
-    data = context.collect_context(["git status"])
+    data = context.collect_context()
 
     assert data["cwd"] == "/tmp/project"
     assert data["shell"] == "bash"
     assert data["username"] == "tester"
     assert data["tools"] == {"git": True}
-    assert data["recent_commands"] == ["git status"]
 
 
 def test_detect_tools_reports_boolean(monkeypatch) -> None:

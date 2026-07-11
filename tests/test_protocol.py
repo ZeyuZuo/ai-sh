@@ -76,11 +76,6 @@ def test_tmksh_json_uses_protocol_output_without_executing(
             {"cwd": str(tmp_path)},
         ),
     )
-    monkeypatch.setattr(
-        "tmksh.cli.execute_command",
-        lambda command: pytest.fail("tmksh --json must never execute"),
-    )
-
     invocation = CliRunner().invoke(tmksh, ["--json", "查看", "状态"])
 
     assert invocation.exit_code == ProtocolExitCode.SUCCESS
@@ -147,7 +142,7 @@ def test_suggest_protocol_applies_local_safety_before_response(
     monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     monkeypatch.setattr(
         "tmksh.suggestion.collect_context",
-        lambda recent_commands=None: {"cwd": str(tmp_path)},
+        lambda: {"cwd": str(tmp_path)},
     )
     monkeypatch.setattr(
         "tmksh.suggestion.generate_command",

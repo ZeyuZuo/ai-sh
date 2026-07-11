@@ -1,6 +1,6 @@
 # tmksh Shell 原生交互改造方案
 
-**状态：** 阶段 1-4 已完成，阶段 5-6 待实施
+**状态：** 阶段 1-4 已完成；旧 REPL 和执行器已删除；阶段 5-6 待实施
 **目标版本：** v0.2  
 **决策日期：** 2026-07-11  
 **替代范围：** v0.1 的自动执行、三选项确认、默认 REPL 和管道分析交互
@@ -11,7 +11,7 @@
 
 tmksh 从“生成并代替用户执行命令的 CLI”调整为“嵌入当前 Shell 的命令输入助手”。
 
-项目、发布包和公开 CLI 已统一命名为 `tmksh`，不再区分生成命令与管理命令的两个入口。`tmksh` 同时承载默认命令建议、`ask`、`config`、`init`、`suggest` 和 legacy `repl`。
+项目、发布包和公开 CLI 已统一命名为 `tmksh`，不再区分生成命令与管理命令的两个入口。`tmksh` 同时承载默认命令建议、`ask`、`config`、`init` 和 `suggest`。
 
 核心交互是：用户在正常的 bash、zsh 或 fish 提示符中按快捷键，输入自然语言，tmksh 将建议命令写入当前 Shell 的输入缓冲区。tmksh 不执行命令，用户可以继续使用原生的光标移动、补全和编辑能力，最终由用户按 Enter 交给当前 Shell 执行。
 
@@ -196,7 +196,6 @@ tmksh init zsh                 输出 zsh Widget 初始化脚本
 tmksh init bash                输出 bash Widget 初始化脚本
 tmksh init fish                输出 fish Widget 初始化脚本
 tmksh suggest                  Shell Widget 使用的内部稳定接口
-tmksh repl                     v0.2 暂时保留的旧 REPL
 ```
 
 安装 Shell 集成时只输出脚本，由用户明确写入配置：
@@ -213,8 +212,7 @@ tmksh 不主动修改任何 Shell 配置文件。
 
 以下 v0.1 配置将被废弃：
 
-- `behavior.default_confirm`：不再需要，tmksh 不执行命令。
-- `safety.hard_block_enabled`：不再允许在普通配置中关闭。
+- 旧配置中的 `behavior.default_confirm` 和 `safety.hard_block_enabled` 会被忽略。
 
 读取旧配置时保持兼容并忽略废弃项，首次展示配置时给出一次迁移提示。
 
@@ -364,8 +362,7 @@ v0.2 是一次有意的行为变更，优先保证不会意外执行命令。
 
 - `tmksh <request>` 从“生成并可能执行”改为“只生成和展示”。
 - 默认 `tmksh` 不再直接进入 REPL，而是展示 Shell 集成引导。
-- 旧 REPL 暂时移动到 `tmksh repl`，标记为 legacy。
-- 命令执行模块只供 legacy REPL 使用，并计划在后续版本删除。
+- 旧 REPL 和内部命令执行器已经删除。
 - 备选命令改为基于当前 buffer 的自然语言修改。
 
 ### 9.3 删除或废弃
@@ -374,7 +371,7 @@ v0.2 是一次有意的行为变更，优先保证不会意外执行命令。
 - 删除 `[y/e/n]` 确认菜单。
 - 废弃 `default_confirm`。
 - 废弃可关闭的本地硬拦截配置。
-- v0.3 删除 legacy REPL 和内部命令执行器，前提是 v0.2 Shell 集成已稳定。
+- 删除 legacy REPL 和内部命令执行器。
 
 ---
 
@@ -508,10 +505,9 @@ v0.2 是一次有意的行为变更，优先保证不会意外执行命令。
 | 文件或模块 | 主要改动 |
 |---|---|
 | `src/tmksh/llm.py` | 区分命令与问答结果，输出统一协议模型 |
-| `src/tmksh/cli.py` | 改为只建议；增加 suggest、ask、init、legacy repl 路由 |
+| `src/tmksh/cli.py` | 改为只建议；增加 suggest、ask、init 路由 |
 | `src/tmksh/safety.py` | 对规范化 command 做最终插入前检查 |
 | `src/tmksh/ui.py` | 保留人类可读展示，删除默认确认和编辑流程 |
-| `src/tmksh/executor.py` | 仅供 legacy REPL，v0.3 删除 |
 | `src/tmksh/history.py` | 记录建议而非推断执行状态，收紧文件权限 |
 | `src/tmksh/shell/` | 新增 zsh、bash、fish 初始化脚本生成器 |
 | `tests/` | 增加协议、无执行保证、Widget 和 API mock 测试 |

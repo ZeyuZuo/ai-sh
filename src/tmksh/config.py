@@ -37,17 +37,8 @@ class ApiConfig:
 class BehaviorConfig:
     """Configuration for command generation and interaction behavior."""
 
-    default_confirm: Literal["y", "n"] = "n"
     history_limit: int = 50
-    context_commands: int = 5
     language: Literal["zh", "en", "auto"] = "zh"
-
-
-@dataclass(frozen=True)
-class SafetyConfig:
-    """Configuration for local safety checks."""
-
-    hard_block_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -56,7 +47,6 @@ class Config:
 
     api: ApiConfig = ApiConfig()
     behavior: BehaviorConfig = BehaviorConfig()
-    safety: SafetyConfig = SafetyConfig()
     path: Path = CONFIG_PATH
 
 
@@ -81,8 +71,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
     api_data = _section(data, "api")
     behavior_data = _section(data, "behavior")
-    safety_data = _section(data, "safety")
-
     api_key = _api_key_from_sources(api_data)
 
     return Config(
@@ -92,13 +80,8 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
             api_key=api_key,
         ),
         behavior=BehaviorConfig(
-            default_confirm=_confirm_choice(behavior_data.get("default_confirm", "n")),
             history_limit=_positive_int(behavior_data, "history_limit", 50),
-            context_commands=_positive_int(behavior_data, "context_commands", 5),
             language=_language(behavior_data.get("language", "zh")),
-        ),
-        safety=SafetyConfig(
-            hard_block_enabled=bool(safety_data.get("hard_block_enabled", True))
         ),
         path=path,
     )
@@ -118,13 +101,8 @@ model = "{DEFAULT_MODEL}"
 api_key = ""
 
 [behavior]
-default_confirm = "n"
 history_limit = 50
-context_commands = 5
 language = "zh"
-
-[safety]
-hard_block_enabled = true
 """
     path.write_text(content, encoding="utf-8")
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -141,7 +119,7 @@ def migrate_legacy_state(
         return ()
 
     migrated: list[str] = []
-    for name in ("config.toml", ".env", "history.json", "repl.txt"):
+    for name in ("config.toml", ".env", "history.json"):
         source = legacy_dir / name
         target = target_dir / name
         if not source.is_file() or source.is_symlink() or target.exists():
@@ -163,11 +141,8 @@ def write_config(
     model: str,
     api_key: str,
     path: Path = CONFIG_PATH,
-    default_confirm: Literal["y", "n"] = "n",
     history_limit: int = 50,
-    context_commands: int = 5,
     language: Literal["zh", "en", "auto"] = "zh",
-    hard_block_enabled: bool = True,
 ) -> Path:
     """Write a complete config file with private permissions."""
 
@@ -185,13 +160,8 @@ model = "{_escape_toml_string(model.strip())}"
 api_key = "{_escape_toml_string(api_key.strip())}"
 
 [behavior]
-default_confirm = "{default_confirm}"
 history_limit = {history_limit}
-context_commands = {context_commands}
 language = "{language}"
-
-[safety]
-hard_block_enabled = {_toml_bool(hard_block_enabled)}
 """
     path.write_text(content, encoding="utf-8")
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -269,17 +239,9 @@ def _positive_int(data: dict[str, object], key: str, default: int) -> int:
     return default
 
 
-def _confirm_choice(value: object) -> Literal["y", "n"]:
-    return "y" if value == "y" else "n"
-
-
 def _language(value: object) -> Literal["zh", "en", "auto"]:
     return value if value in {"zh", "en", "auto"} else "zh"
 
 
 def _escape_toml_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _toml_bool(value: bool) -> str:
-    return "true" if value else "false"

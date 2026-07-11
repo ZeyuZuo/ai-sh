@@ -86,7 +86,6 @@ def build_messages(
     *,
     stdin_context: str = "",
     current_command: str = "",
-    conversation: list[ChatMessage] | None = None,
     language: str = "zh",
 ) -> list[ChatMessage]:
     """Build chat messages for command generation."""
@@ -114,8 +113,6 @@ def build_messages(
     user_parts.extend(["用户意图:", user_input])
 
     messages: list[ChatMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    if conversation:
-        messages.extend(conversation[-20:])
     messages.append({"role": "user", "content": "\n".join(user_parts)})
     return messages
 
@@ -249,27 +246,6 @@ def parse_command_result(content: str) -> AssistantResult:
         clarification=clarification,
         error=error,
     )
-
-
-def result_to_assistant_message(result: AssistantResult) -> ChatMessage:
-    """Serialize a command result back into conversation history."""
-
-    return {
-        "role": "assistant",
-        "content": json.dumps(
-            {
-                "kind": result.kind,
-                "command": result.command,
-                "answer": result.answer,
-                "explanation": result.explanation,
-                "risk_level": result.risk_level,
-                "risk_reason": result.risk_reason,
-                "clarification": result.clarification,
-                "error": result.error,
-            },
-            ensure_ascii=False,
-        ),
-    }
 
 
 def _create_without_json_mode(

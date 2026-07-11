@@ -90,8 +90,7 @@ tmksh/
 │       ├── protocol.py     # 版本化 stdin/stdout 机器协议
 │       ├── shell/          # Bash Readline 和 Zsh ZLE 脚本生成器
 │       ├── safety.py       # 本地危险命令检测
-│       ├── executor.py     # legacy REPL 的 subprocess 执行
-│       ├── history.py      # 对话历史 + 命令历史持久化
+│       ├── history.py      # 建议历史持久化
 │       └── ui.py           # rich 渲染，交互提示
 ├── tests/
 │   ├── test_safety.py
@@ -121,7 +120,6 @@ tmksh/
 - `protocol.py`：校验机器请求，序列化稳定响应，不调用 AI 或终端 UI
 - `shell/`：生成固定的 Shell Widget 脚本，只填充输入 buffer，不执行模型命令
 - `safety.py`：纯函数，输入命令字符串，输出判断结果，无副作用
-- `executor.py`：仅为 legacy REPL 执行命令并捕获输出，不做安全判断
 - `history.py`：读写历史文件，不知道命令是否危险
 - `ui.py`：只做渲染和用户输入，不调用 AI，不执行命令
 
@@ -158,8 +156,6 @@ class HistoryEntry:
     timestamp: str        # ISO 8601
     user_input: str
     command: str
-    executed: bool
-    exit_code: int | None = None
 ```
 
 ---

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from tmksh.config import Config
 from tmksh.context import collect_context
-from tmksh.history import Conversation
 from tmksh.llm import AssistantResult, build_messages, generate_command
 from tmksh.safety import check_command
 
@@ -25,18 +24,15 @@ def create_suggestion(
     *,
     stdin_context: str = "",
     current_command: str = "",
-    conversation: Conversation | None = None,
-    recent_commands: list[str] | None = None,
 ) -> Suggestion:
     """Generate one assistant result and apply the mandatory local safety policy."""
 
-    environment = collect_context(recent_commands=recent_commands)
+    environment = collect_context()
     messages = build_messages(
         request,
         environment,
         stdin_context=stdin_context,
         current_command=current_command,
-        conversation=conversation.messages if conversation else None,
         language=config.behavior.language,
     )
     result = normalize_result(generate_command(config, messages))

@@ -15,7 +15,7 @@
 - 自然语言生成 shell 命令
 - Bash 和 Zsh 原生命令行 Widget，默认快捷键 `Ctrl+G`
 - 独立的 `tmksh ask` 管道内容分析和普通问答模式
-- 单次建议模式和显式 legacy REPL
+- 单次建议模式，任何建议都不由 tmksh 执行
 - `tmksh --json` 和 `tmksh suggest` 稳定机器接口
 - 自动收集 cwd、shell、OS、用户名和 PATH 中的关键工具
 - 每条命令都有解释和风险等级
@@ -125,18 +125,13 @@ model = "deepseek-ai/DeepSeek-V3.2"
 api_key = ""
 
 [behavior]
-default_confirm = "n"
 history_limit = 50
-context_commands = 5
 language = "zh"
-
-[safety]
-hard_block_enabled = true
 ```
 
 `base_url` 和 `model` 从 `~/.tmksh/config.toml` 读取。`api_key` 的读取优先级是：已 export 的 `SILICONFLOW_API` 环境变量优先，其次是当前目录 `.env`、`~/.tmksh/.env`，最后是配置文件中的 `api_key`。
 
-从旧版升级时，tmksh 会在新文件不存在的前提下，把 `~/.ai-sh` 中的配置、`.env`、历史和 REPL 记录复制到 `~/.tmksh`。旧目录不会自动删除，可在确认新版本工作正常后自行清理。
+从旧版升级时，tmksh 会在新文件不存在的前提下，把 `~/.ai-sh` 中的配置、`.env` 和建议历史复制到 `~/.tmksh`。旧目录不会自动删除，可在确认新版本工作正常后自行清理。旧配置中的废弃字段会被忽略。
 
 ## Usage
 
@@ -203,22 +198,6 @@ uv run tmksh ask "解释 git rebase 和 merge 的区别"
 
 Shell Widget 使用的版本化 stdin/stdout 协议由 `tmksh suggest` 提供，格式、限制和退出码见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md#7-后端结果协议)。
 
-旧版 REPL 暂时保留为显式 legacy 命令：
-
-```bash
-uv run tmksh repl
-```
-
-REPL 示例：
-
-```text
-tmksh> 找出最近一天修改的 python 文件
-tmksh> 把刚才的结果只保留 src/ 目录下的
-tmksh> 用 wc -l 统计一下行数
-```
-
-`--dry-run` 仅作为兼容参数保留；默认 `tmksh` 已经始终是 dry-run 语义。
-
 ## Safety Model
 
 `tmksh` 的安全策略是多层的：
@@ -227,7 +206,7 @@ tmksh> 用 wc -l 统计一下行数
 2. 本地正则和参数解析只硬拦截灾难级危险命令。
 3. `danger` 和命中本地硬拦截的命令直接拒绝。
 4. `safe` 和 `caution` 命令只展示或填入当前 Shell；`caution` 会同时显示风险原因。
-5. 只有显式调用的 legacy REPL 暂时保留旧执行能力。
+5. tmksh 不提供执行路径；用户按 Enter 后由当前 Shell 原生执行。
 
 本地硬拦截覆盖这些高风险模式：
 
@@ -288,8 +267,7 @@ src/tmksh/
   protocol.py   # Shell Widget 使用的版本化机器协议
   shell/        # Bash Readline 和 Zsh ZLE 初始化脚本
   safety.py     # 本地危险命令检测
-  executor.py   # legacy REPL 的 subprocess 执行
-  history.py    # 建议历史和 legacy REPL 上下文
+  history.py    # 本地建议历史
   ui.py         # Rich 人类可读结果渲染
 ```
 
@@ -303,6 +281,6 @@ src/tmksh/
 
 ## Status
 
-包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP；阶段四已经将管道分析拆分为独立的 `tmksh ask` 问答模式。legacy REPL 只用于迁移兼容。
+包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消所有执行路径并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP；阶段四已经将管道分析拆分为独立的 `tmksh ask` 问答模式。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。目标逻辑和分阶段开发计划见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。

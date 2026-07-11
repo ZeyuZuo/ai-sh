@@ -22,7 +22,6 @@ def test_load_config_defaults_and_env_override(tmp_path, monkeypatch) -> None:
     assert config.api.base_url == DEFAULT_BASE_URL
     assert config.api.model == DEFAULT_MODEL
     assert config.api.api_key == "secret-from-env"
-    assert config.behavior.default_confirm == "n"
 
 
 def test_load_config_ignores_empty_env_and_reads_dotenv(tmp_path, monkeypatch) -> None:
@@ -48,13 +47,8 @@ def test_load_config_reads_file_values(tmp_path, monkeypatch) -> None:
         api_key = "file-key"
 
         [behavior]
-        default_confirm = "y"
         history_limit = 12
-        context_commands = 3
         language = "en"
-
-        [safety]
-        hard_block_enabled = false
         """,
         encoding="utf-8",
     )
@@ -65,9 +59,7 @@ def test_load_config_reads_file_values(tmp_path, monkeypatch) -> None:
     assert config.api.model == "custom-model"
     assert config.api.api_key == "file-key"
     assert config.behavior.history_limit == 12
-    assert config.behavior.context_commands == 3
     assert config.behavior.language == "en"
-    assert config.safety.hard_block_enabled is False
 
 
 def test_ensure_default_config_uses_600_permissions(tmp_path) -> None:

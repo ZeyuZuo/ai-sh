@@ -1,10 +1,9 @@
 import pytest
 from click.testing import CliRunner
 
-from tmksh.cli import _read_stdin_if_piped, _run_legacy_once, tmksh
+from tmksh.cli import _read_stdin_if_piped, tmksh
 from tmksh.protocol import MAX_STDIN_CONTEXT_CHARS
-from tmksh.executor import ExecutionResult
-from tmksh.history import Conversation, HistoryStore
+from tmksh.history import HistoryStore
 from tmksh.llm import AssistantResult
 from tmksh.suggestion import Suggestion
 
@@ -30,26 +29,12 @@ def test_tmksh_never_executes_or_prompts(
         lambda limit: HistoryStore(history_path, limit=limit),
     )
 
-    called = {"execute": False, "prompt": False}
-
-    def fake_execute(command: str) -> ExecutionResult:
-        called["execute"] = True
-        return ExecutionResult(command, 0, "", "")
-
-    def fake_prompt(*args, **kwargs) -> str:
-        called["prompt"] = True
-        return "y"
-
-    monkeypatch.setattr("tmksh.cli.execute_command", fake_execute)
-    monkeypatch.setattr("tmksh.cli.prompt_confirm", fake_prompt)
-
     invocation = CliRunner().invoke(tmksh, ["suggest something"])
 
     assert invocation.exit_code == 0
-    assert called == {"execute": False, "prompt": False}
     assert "建议命令（未执行）" in invocation.output
     entries = HistoryStore(history_path).load_entries()
-    assert entries[-1].executed is False
+    assert entries[-1].command == result.command
 
 
 def test_tmksh_renders_block_without_executing(monkeypatch, tmp_path) -> None:
@@ -63,44 +48,10 @@ def test_tmksh_renders_block_without_executing(monkeypatch, tmp_path) -> None:
         "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: _suggestion(tmp_path, blocked),
     )
-    monkeypatch.setattr(
-        "tmksh.cli.execute_command",
-        lambda command: pytest.fail("default tmksh must never execute"),
-    )
-
     invocation = CliRunner().invoke(tmksh, ["delete", "everything"])
 
     assert invocation.exit_code == 0
     assert "已拦截危险命令" in invocation.output
-
-
-def test_tmksh_dry_run_is_compatible_and_still_never_executes(
-    monkeypatch, tmp_path
-) -> None:
-    history_path = tmp_path / "history.json"
-    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
-    monkeypatch.setattr(
-        "tmksh.cli.create_suggestion",
-        lambda *args, **kwargs: _suggestion(
-            tmp_path,
-            AssistantResult(
-                command="printf ok", explanation="prints", risk_level="safe"
-            ),
-        ),
-    )
-    monkeypatch.setattr(
-        "tmksh.cli.execute_command",
-        lambda command: pytest.fail("default tmksh must never execute"),
-    )
-    monkeypatch.setattr(
-        "tmksh.cli.HistoryStore",
-        lambda limit: HistoryStore(history_path, limit=limit),
-    )
-
-    invocation = CliRunner().invoke(tmksh, ["--dry-run", "say", "hello"])
-
-    assert invocation.exit_code == 0
-    assert "建议命令（未执行）" in invocation.output
 
 
 def test_tmksh_ask_returns_plain_text_for_piped_diff(monkeypatch, tmp_path) -> None:
@@ -258,77 +209,16 @@ def test_tmksh_config_show_redacts_api_key(monkeypatch, tmp_path) -> None:
     assert "test-key" not in invocation.output
 
 
-def test_legacy_repl_path_can_execute_and_keeps_conversation(
-    monkeypatch, tmp_path
-) -> None:
-    history = HistoryStore(tmp_path / "history.json", limit=10)
-    conversation = Conversation(max_messages=20)
-    config = _config(tmp_path, default_confirm="y")
-    result = AssistantResult(
-        command="printf done",
-        explanation="prints done",
-        risk_level="safe",
-    )
-    monkeypatch.setattr(
-        "tmksh.cli.create_suggestion",
-        lambda *args, **kwargs: _suggestion(tmp_path, result),
-    )
-    monkeypatch.setattr(
-        "tmksh.cli.execute_command",
-        lambda command: ExecutionResult(command, 0, "done", ""),
-    )
-
-    _run_legacy_once(
-        "打印 done",
-        stdin_context="",
-        dry_run=False,
-        config=config,
-        history=history,
-        conversation=conversation,
-    )
-
-    assert history.load_entries()[-1].executed is True
-    assert "done" in conversation.messages[-1]["content"]
-
-
-def test_legacy_repl_dry_run_does_not_execute(monkeypatch, tmp_path) -> None:
-    history = HistoryStore(tmp_path / "history.json", limit=10)
-    result = AssistantResult(
-        command="printf no", explanation="prints", risk_level="safe"
-    )
-    monkeypatch.setattr(
-        "tmksh.cli.create_suggestion",
-        lambda *args, **kwargs: _suggestion(tmp_path, result),
-    )
-    monkeypatch.setattr(
-        "tmksh.cli.execute_command",
-        lambda command: pytest.fail("legacy dry-run must not execute"),
-    )
-
-    _run_legacy_once(
-        "打印 no",
-        stdin_context="",
-        dry_run=True,
-        config=_config(tmp_path),
-        history=history,
-    )
-
-    assert history.load_entries()[-1].executed is False
-
-
 def _suggestion(tmp_path, result: AssistantResult) -> Suggestion:
     return Suggestion(result=result, environment={"cwd": str(tmp_path)})
 
 
-def _config(tmp_path, default_confirm="n"):
-    from tmksh.config import ApiConfig, BehaviorConfig, Config, SafetyConfig
+def _config(tmp_path):
+    from tmksh.config import ApiConfig, BehaviorConfig, Config
 
     return Config(
         api=ApiConfig(api_key="test-key"),
-        behavior=BehaviorConfig(
-            default_confirm=default_confirm, history_limit=10, context_commands=2
-        ),
-        safety=SafetyConfig(hard_block_enabled=True),
+        behavior=BehaviorConfig(history_limit=10),
         path=tmp_path / "config.toml",
     )
 
