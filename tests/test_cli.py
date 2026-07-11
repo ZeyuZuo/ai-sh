@@ -101,6 +101,102 @@ def test_ai_dry_run_is_compatible_and_still_never_executes(
     assert "建议命令（未执行）" in invocation.output
 
 
+def test_ai_ask_returns_plain_text_for_piped_diff(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    captured = {}
+
+    def fake_answer(config, question, **kwargs):
+        captured.update(question=question, **kwargs)
+        return "修改了命令行入口。"
+
+    monkeypatch.setattr("ai_sh.cli.create_answer", fake_answer)
+    monkeypatch.setattr(
+        "ai_sh.cli.create_suggestion",
+        lambda *args, **kwargs: pytest.fail("ask must not generate a command"),
+    )
+    monkeypatch.setattr(
+        "ai_sh.cli.HistoryStore",
+        lambda *args, **kwargs: pytest.fail("ask must not access history"),
+    )
+
+    invocation = CliRunner().invoke(
+        ai,
+        ["--ask", "总结这些修改"],
+        input="diff --git a/src/cli.py b/src/cli.py\n",
+    )
+
+    assert invocation.exit_code == 0
+    assert invocation.output == "修改了命令行入口。\n"
+    assert captured["question"] == "总结这些修改"
+    assert "diff --git" in captured["stdin_context"]
+    assert captured["stdin_truncated"] is False
+
+
+def test_ai_ask_supports_question_without_stdin(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("ai_sh.cli.sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(
+        "ai_sh.cli.create_answer",
+        lambda config, question, **kwargs: "Git rebase 会重写提交历史。",
+    )
+
+    invocation = CliRunner().invoke(ai, ["--ask", "什么是 git rebase？"])
+
+    assert invocation.exit_code == 0
+    assert invocation.output == "Git rebase 会重写提交历史。\n"
+
+
+def test_ai_ask_failure_is_nonzero_and_understandable(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr("ai_sh.cli.sys.stdin.isatty", lambda: True)
+
+    def fail(*args, **kwargs):
+        from ai_sh.exceptions import ApiError
+
+        raise ApiError("服务暂时不可用，credential=test-key")
+
+    monkeypatch.setattr("ai_sh.cli.create_answer", fail)
+
+    invocation = CliRunner().invoke(ai, ["--ask", "分析报错"])
+
+    assert invocation.exit_code == 1
+    assert "错误：服务暂时不可用" in invocation.output
+    assert "test-key" not in invocation.output
+    assert "[redacted]" in invocation.output
+
+
+def test_ai_ask_reports_truncated_log_input(monkeypatch, tmp_path) -> None:
+    from ai_sh.answer import MAX_ASK_STDIN_BYTES
+
+    monkeypatch.setattr("ai_sh.cli.load_config", lambda: _config(tmp_path))
+    captured = {}
+
+    def fake_answer(config, question, **kwargs):
+        captured.update(kwargs)
+        return "日志分析完成。"
+
+    monkeypatch.setattr("ai_sh.cli.create_answer", fake_answer)
+
+    invocation = CliRunner().invoke(
+        ai,
+        ["--ask", "分析日志"],
+        input="E" * (MAX_ASK_STDIN_BYTES + 1),
+    )
+
+    assert invocation.exit_code == 0
+    assert "stdin 超过 65536 字节" in invocation.output
+    assert "日志分析完成。" in invocation.output
+    assert len(captured["stdin_context"].encode()) == MAX_ASK_STDIN_BYTES
+    assert captured["stdin_truncated"] is True
+
+
+def test_ai_ask_rejects_json_combination() -> None:
+    invocation = CliRunner().invoke(ai, ["--ask", "--json", "回答问题"])
+
+    assert invocation.exit_code == 2
+    assert "--ask 不能与 --json 同时使用" in invocation.output
+
+
 def test_ai_sh_without_subcommand_shows_legacy_guidance() -> None:
     invocation = CliRunner().invoke(ai_sh)
 

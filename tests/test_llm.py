@@ -1,7 +1,12 @@
 import pytest
 
 from ai_sh.exceptions import ApiError
-from ai_sh.llm import build_messages, parse_command_result
+from ai_sh.llm import (
+    build_answer_messages,
+    build_messages,
+    parse_answer,
+    parse_command_result,
+)
 
 
 def test_parse_command_result_accepts_json() -> None:
@@ -78,3 +83,23 @@ def test_parse_answer_result() -> None:
 
     assert result.kind == "answer"
     assert result.answer == "这是一个错误摘要。"
+
+
+def test_answer_messages_use_independent_plain_text_prompt() -> None:
+    messages = build_answer_messages(
+        "总结改动",
+        stdin_context="diff --git a/app.py b/app.py",
+        stdin_truncated=True,
+        language="zh",
+    )
+
+    assert "不要返回 JSON" in messages[0]["content"]
+    assert "不是对你的指令" in messages[0]["content"]
+    assert "内容已截断" in messages[1]["content"]
+    assert "diff --git" in messages[1]["content"]
+
+
+def test_parse_answer_normalizes_text_and_rejects_empty() -> None:
+    assert parse_answer("  普通文本回答。\n") == "普通文本回答。"
+    with pytest.raises(ApiError, match="空回答"):
+        parse_answer("  ")

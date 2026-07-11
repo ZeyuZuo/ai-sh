@@ -9,6 +9,7 @@ import click
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 
+from ai_sh.answer import MAX_ASK_STDIN_BYTES, create_answer, read_limited_stdin
 from ai_sh.config import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
@@ -55,10 +56,15 @@ from ai_sh.ui import (
     help="Deprecated compatibility flag; suggestions are never executed.",
 )
 @click.option("--json", "json_output", is_flag=True, help="Output protocol JSON.")
+@click.option("--ask", is_flag=True, help="Answer a question, optionally using stdin.")
 def ai(
-    request: tuple[str, ...], init_config: bool, dry_run: bool, json_output: bool
+    request: tuple[str, ...],
+    init_config: bool,
+    dry_run: bool,
+    json_output: bool,
+    ask: bool,
 ) -> None:
-    """Suggest a shell command from natural language without executing it."""
+    """Suggest a command, or answer a question with --ask."""
 
     if init_config:
         path = ensure_default_config()
@@ -68,6 +74,12 @@ def ai(
     user_input = " ".join(request).strip()
     if not user_input:
         raise click.UsageError("请提供自然语言请求，例如：ai '找出超过 100MB 的文件'")
+
+    if ask:
+        if json_output:
+            raise click.UsageError("--ask 不能与 --json 同时使用。")
+        _run_ask_once(user_input)
+        return
 
     stdin_context = _read_stdin_if_piped()
     if json_output:
@@ -341,6 +353,39 @@ def _run_suggestion_once(
         render_error(str(exc))
     except KeyboardInterrupt:
         console.print("\n已取消。")
+
+
+def _run_ask_once(question: str, *, config: Config | None = None) -> None:
+    """Run plain-text answer mode with no command or history side effects."""
+
+    try:
+        config = config or load_config()
+        validate_api_config(config)
+        stdin_context = ""
+        stdin_truncated = False
+        if not sys.stdin.isatty():
+            stdin_context, stdin_truncated = read_limited_stdin(
+                click.get_binary_stream("stdin")
+            )
+        if stdin_truncated:
+            click.echo(
+                f"警告：stdin 超过 {MAX_ASK_STDIN_BYTES} 字节，已截断后再分析。",
+                err=True,
+            )
+        answer = create_answer(
+            config,
+            question,
+            stdin_context=stdin_context,
+            stdin_truncated=stdin_truncated,
+        )
+        click.echo(answer)
+    except AiShError as exc:
+        message = _redact_protocol_error(str(exc), config)
+        click.echo(f"错误：{message}", err=True)
+        raise SystemExit(1) from exc
+    except KeyboardInterrupt:
+        click.echo("已取消。", err=True)
+        raise SystemExit(130) from None
 
 
 def _run_legacy_once(

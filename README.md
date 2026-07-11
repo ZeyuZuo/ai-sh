@@ -14,6 +14,7 @@
 
 - 自然语言生成 shell 命令
 - Bash 和 Zsh 原生命令行 Widget，默认快捷键 `Ctrl+G`
+- 独立的 `ai --ask` 管道内容分析和普通问答模式
 - 单次建议模式和显式 legacy REPL
 - `ai --json` 和 `ai-sh suggest` 稳定机器接口
 - 自动收集 cwd、shell、OS、用户名和 PATH 中的关键工具
@@ -190,6 +191,21 @@ uv run ai "找出当前目录下超过 100MB 的文件"
 uv run ai --json "找出当前目录下超过 100MB 的文件"
 ```
 
+分析管道内容时使用独立问答模式：
+
+```bash
+git diff | uv run ai --ask "总结这些修改"
+journalctl -u my-service -n 200 | uv run ai --ask "分析失败原因"
+```
+
+也可以不使用管道，直接提问：
+
+```bash
+uv run ai --ask "解释 git rebase 和 merge 的区别"
+```
+
+`--ask` 直接输出自然语言答案，不生成命令、不进入命令安全或执行流程，也不写入建议历史。管道输入按原始 UTF-8 数据流读取，最多保留 64 KiB；超过限制时 stderr 会显示截断警告，模型也会收到内容不完整的标记。问答失败返回非零退出码。
+
 Shell Widget 使用的版本化 stdin/stdout 协议由 `ai-sh suggest` 提供，格式、限制和退出码见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md#7-后端结果协议)。
 
 旧版 REPL 暂时保留为显式 legacy 命令：
@@ -268,10 +284,11 @@ uv build
 
 ```text
 src/ai_sh/
+  answer.py     # 独立问答编排和 stdin 流式限长读取
   cli.py        # click 入口：ai 和 ai-sh
   config.py     # 配置读取和默认值
   context.py    # 环境上下文收集
-  llm.py        # SiliconFlow/OpenAI 兼容调用和 JSON 解析
+  llm.py        # 命令 JSON 与问答纯文本的独立提示词、调用和解析
   suggestion.py # 建议生成编排和最终安全归一化
   protocol.py   # Shell Widget 使用的版本化机器协议
   shell/        # Bash Readline 和 Zsh ZLE 初始化脚本
@@ -286,10 +303,11 @@ src/ai_sh/
 - API key 不写入历史。
 - API key 不打印到终端。
 - 历史记录只保存在本地 `~/.ai-sh/history.json`。
+- `ai --ask` 的问题和 stdin 内容不写入持久化历史。
 - 除了调用你配置的 API endpoint，项目不会把命令数据发送到其他远端。
 
 ## Status
 
-包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP。legacy REPL 只用于迁移兼容。
+包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP；阶段四已经将管道分析拆分为独立的 `ai --ask` 问答模式。legacy REPL 只用于迁移兼容。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。目标逻辑和分阶段开发计划见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。
