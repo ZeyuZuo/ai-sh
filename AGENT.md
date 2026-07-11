@@ -88,6 +88,7 @@ ai-sh/
 │       ├── llm.py          # OpenAI SDK 封装，prompt 管理
 │       ├── suggestion.py   # 建议生成编排和最终安全归一化
 │       ├── protocol.py     # 版本化 stdin/stdout 机器协议
+│       ├── shell/          # Bash Readline 和 Zsh ZLE 脚本生成器
 │       ├── safety.py       # 本地危险命令检测
 │       ├── executor.py     # legacy REPL 的 subprocess 执行
 │       ├── history.py      # 对话历史 + 命令历史持久化
@@ -118,6 +119,7 @@ ai-sh/
 - `llm.py`：封装 AI 调用，输入 messages，输出 `AssistantResult`，不知道终端 UI
 - `suggestion.py`：编排上下文、LLM 和安全检查，输出最终可展示或可插入结果
 - `protocol.py`：校验机器请求，序列化稳定响应，不调用 AI 或终端 UI
+- `shell/`：生成固定的 Shell Widget 脚本，只填充输入 buffer，不执行模型命令
 - `safety.py`：纯函数，输入命令字符串，输出判断结果，无副作用
 - `executor.py`：仅为 legacy REPL 执行命令并捕获输出，不做安全判断
 - `history.py`：读写历史文件，不知道命令是否危险

@@ -200,6 +200,10 @@ ai-sh repl                   v0.2 暂时保留的旧 REPL
 安装 Shell 集成时只输出脚本，由用户明确写入配置：
 
 ```bash
+# Bash
+eval "$(ai-sh init bash)"
+
+# Zsh
 eval "$(ai-sh init zsh)"
 ```
 
@@ -230,6 +234,8 @@ ai-sh 不主动修改任何 Shell 配置文件。
 ```
 
 Widget 与 Python 后端之间使用稳定的结构化协议。请求和当前 buffer 通过 stdin 传递，避免 Shell 字符串插值和将可能包含敏感信息的命令放入进程参数。后端 stdout 只输出协议数据，诊断信息写入 stderr。
+
+生成的 Bash/Zsh Widget 使用 `request<NUL>buffer` 作为内部 Shell 安全传输帧，并调用 `ai-sh suggest --input-format nul`；后端随即转换为同一个 `ProtocolRequest`。公开机器接口仍默认读取下方的版本化 JSON。两种输入方式共用相同长度限制、结果协议和退出码。
 
 ### 6.2 bash
 
@@ -374,6 +380,8 @@ v0.2 是一次有意的行为变更，优先保证不会意外执行命令。
 
 ### 阶段 1：重构结果模型与执行边界
 
+**实施状态：已完成。**
+
 目标：先建立“AI 永不自动执行”的新底线，不依赖 Shell Widget 是否完成。
 
 任务：
@@ -393,6 +401,8 @@ v0.2 是一次有意的行为变更，优先保证不会意外执行命令。
 
 ### 阶段 2：建立稳定的机器接口
 
+**实施状态：已完成。**
+
 目标：提供 Shell Widget 可以依赖的无 UI 后端。
 
 任务：
@@ -411,6 +421,8 @@ v0.2 是一次有意的行为变更，优先保证不会意外执行命令。
 - 协议测试使用固定样例，避免后续 Widget 与后端静默不兼容。
 
 ### 阶段 3：实现 bash 与 zsh Widget MVP
+
+**实施状态：已完成。** Bash 5.3 已通过语法、函数和真实 Readline 快捷键验证；Zsh 5.9 已通过语法、函数和真实 ZLE `recursive-edit` 快捷键验证。Zsh 自动化原生测试在未安装 zsh 的环境会明确跳过。
 
 目标：在 Linux 常用的 bash 和 zsh 中验证核心产品形态，而不是继续扩展旧 CLI UI。实现顺序先 bash、后 zsh，但两者都完成才算本阶段通过。
 

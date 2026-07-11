@@ -33,7 +33,7 @@ from ai_sh.protocol import (
     redact_sensitive,
     validate_protocol_fields,
 )
-from ai_sh.shell import render_bash_init
+from ai_sh.shell import render_bash_init, render_zsh_init
 from ai_sh.suggestion import create_suggestion, normalize_result
 from ai_sh.ui import (
     console,
@@ -233,6 +233,19 @@ def init_bash(key_binding: str) -> None:
     """Print the Bash Readline widget initialization script."""
 
     click.echo(render_bash_init(key_binding=key_binding))
+
+
+@init_shell.command("zsh", context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "--key-binding",
+    default="^G",
+    show_default=True,
+    help="Zsh key sequence.",
+)
+def init_zsh(key_binding: str) -> None:
+    """Print the Zsh ZLE widget initialization script."""
+
+    click.echo(render_zsh_init(key_binding=key_binding))
 
 
 def _machine_suggestion_response(

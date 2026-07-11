@@ -1,62 +1,95 @@
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from ai_sh.cli import ai_sh
-from ai_sh.shell import render_bash_init
+from ai_sh.shell import render_bash_init, render_zsh_init
+
+ZSH = shutil.which("zsh")
 
 
-def test_bash_init_command_outputs_loadable_script() -> None:
-    invocation = CliRunner().invoke(ai_sh, ["init", "bash"])
+def test_zsh_init_command_outputs_zle_script() -> None:
+    invocation = CliRunner().invoke(ai_sh, ["init", "zsh"])
 
     assert invocation.exit_code == 0
     assert "__ai_sh_widget" in invocation.stdout
-    assert "READLINE_LINE" in invocation.stdout
-    assert "bind -x" in invocation.stdout
+    assert 'original_buffer="$BUFFER"' in invocation.stdout
+    assert "zle -N __ai_sh_widget" in invocation.stdout
+    assert "bindkey '^G' __ai_sh_widget" in invocation.stdout
     assert "suggest --input-format nul" in invocation.stdout
 
-    syntax = subprocess.run(
-        ["bash", "-n"],
-        input=invocation.stdout,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert syntax.returncode == 0, syntax.stderr
 
-
-def test_bash_init_supports_custom_binding() -> None:
-    script = render_bash_init(
-        key_binding=r"\C-x\C-a",
+def test_zsh_init_supports_custom_binding_and_quoted_path() -> None:
+    script = render_zsh_init(
+        key_binding="^[a",
         command_path="/opt/ai sh/bin/ai-sh",
         python_path="/opt/python/bin/python",
     )
 
-    assert r'"\C-x\C-a":__ai_sh_widget' in script
+    assert "bindkey '^[a' __ai_sh_widget" in script
     assert "'/opt/ai sh/bin/ai-sh'" in script
 
 
-def test_bash_widget_replaces_buffer_without_executing(tmp_path) -> None:
+def test_bash_and_zsh_widgets_share_protocol_and_safety_semantics() -> None:
+    scripts = [
+        render_bash_init(command_path="ai-sh", python_path="python3"),
+        render_zsh_init(command_path="ai-sh", python_path="python3"),
+    ]
+
+    for script in scripts:
+        assert "suggest --input-format nul" in script
+        assert "printf '%s\\0%s'" in script
+        assert ("status == 0" in script) or ("exit_status == 0" in script)
+        assert ("status == 30" in script) or ("exit_status == 30" in script)
+        assert "attempts < 3" in script
+        assert "risk_reason" in script
+        assert "eval " not in script
+    assert 'original_point="$READLINE_POINT"' in scripts[0]
+    assert 'READLINE_POINT="$original_point"' in scripts[0]
+    assert "original_cursor=$CURSOR" in scripts[1]
+    assert "CURSOR=$original_cursor" in scripts[1]
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_init_script_passes_native_syntax_check() -> None:
+    script = render_zsh_init(command_path="ai-sh", python_path=sys.executable)
+
+    syntax = subprocess.run(
+        [ZSH, "-n"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert syntax.returncode == 0, syntax.stderr
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_replaces_buffer_and_handles_clarification(tmp_path) -> None:
     completed = _run_widget(
         tmp_path,
-        user_input="按修改时间排序\n",
-        original_line="find src -type f",
+        user_input="clarify\n./src\n",
+        original_buffer="find .",
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "safe · generated safely" in completed.stdout
-    expected = "find src -type f | sort -nr"
+    assert "需要澄清：请提供目录。" in completed.stdout
+    expected = "find . ./src"
     assert _line_from_output(completed.stdout) == expected
     assert _point_from_output(completed.stdout) == len(expected)
 
 
-def test_bash_widget_shows_caution_and_only_fills_buffer(tmp_path) -> None:
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_shows_caution_and_only_fills_buffer(tmp_path) -> None:
     completed = _run_widget(
         tmp_path,
         user_input="caution\n",
-        original_line="rm -rf ./build",
+        original_buffer="rm -rf ./build",
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -64,63 +97,48 @@ def test_bash_widget_shows_caution_and_only_fills_buffer(tmp_path) -> None:
     assert _line_from_output(completed.stdout) == "rm -rf ./build --interactive"
 
 
-def test_bash_widget_restores_buffer_when_blocked_or_cancelled(tmp_path) -> None:
-    blocked = _run_widget(
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_restores_buffer_when_blocked(tmp_path) -> None:
+    completed = _run_widget(
         tmp_path,
         user_input="block\n",
-        original_line="keep --this",
-        original_point=4,
-    )
-    cancelled = _run_widget(
-        tmp_path,
-        user_input="\n",
-        original_line="keep --this",
-        original_point=4,
-    )
-
-    assert "删除根目录" in blocked.stdout
-    assert _line_from_output(blocked.stdout) == "keep --this"
-    assert _point_from_output(blocked.stdout) == 4
-    assert _line_from_output(cancelled.stdout) == "keep --this"
-    assert _point_from_output(cancelled.stdout) == 4
-
-
-def test_bash_widget_restores_buffer_and_cursor_on_api_error(tmp_path) -> None:
-    completed = _run_widget(
-        tmp_path,
-        user_input="error\n",
-        original_line="git status --short",
-        original_point=3,
-    )
-
-    assert "连接 AI 服务失败" in completed.stdout
-    assert _line_from_output(completed.stdout) == "git status --short"
-    assert _point_from_output(completed.stdout) == 3
-
-
-def test_bash_widget_handles_clarification_in_same_interaction(tmp_path) -> None:
-    completed = _run_widget(
-        tmp_path,
-        user_input="clarify\n./src\n",
-        original_line="find .",
+        original_buffer="keep --this",
+        original_cursor=4,
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "需要澄清：请提供目录。" in completed.stdout
-    assert _line_from_output(completed.stdout) == "find . ./src"
+    assert "删除根目录" in completed.stdout
+    assert _line_from_output(completed.stdout) == "keep --this"
+    assert _point_from_output(completed.stdout) == 4
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_restores_buffer_and_cursor_on_api_error(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="error\n",
+        original_buffer="git status --short",
+        original_cursor=3,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "连接 AI 服务失败" in completed.stdout
+    assert _line_from_output(completed.stdout) == "git status --short"
+    assert _point_from_output(completed.stdout) == 3
 
 
 def _run_widget(
     tmp_path: Path,
     *,
     user_input: str,
-    original_line: str,
-    original_point: int | None = None,
+    original_buffer: str,
+    original_cursor: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    assert ZSH is not None
     backend = _write_fake_backend(tmp_path)
-    init_path = tmp_path / "bash-init.sh"
+    init_path = tmp_path / "zsh-init.zsh"
     init_path.write_text(
-        render_bash_init(
+        render_zsh_init(
             command_path=str(backend),
             python_path=sys.executable,
         ),
@@ -128,23 +146,22 @@ def _run_widget(
     )
     shell_code = r"""
 source "$1"
-READLINE_LINE="$2"
-READLINE_POINT=$3
+BUFFER="$2"
+CURSOR=$3
 __ai_sh_widget
-printf '\n__AI_SH_LINE__=%s\n' "$READLINE_LINE"
-printf '__AI_SH_POINT__=%s\n' "$READLINE_POINT"
+print -r -- "__AI_SH_LINE__=$BUFFER"
+print -r -- "__AI_SH_POINT__=$CURSOR"
 """
     return subprocess.run(
         [
-            "bash",
-            "--noprofile",
-            "--norc",
+            ZSH,
+            "-f",
             "-c",
             shell_code,
-            "bash",
+            "zsh",
             str(init_path),
-            original_line,
-            str(len(original_line) if original_point is None else original_point),
+            original_buffer,
+            str(len(original_buffer) if original_cursor is None else original_cursor),
         ],
         input=user_input,
         text=True,

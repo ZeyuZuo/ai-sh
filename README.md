@@ -13,6 +13,7 @@
 ## Highlights
 
 - 自然语言生成 shell 命令
+- Bash 和 Zsh 原生命令行 Widget，默认快捷键 `Ctrl+G`
 - 单次建议模式和显式 legacy REPL
 - `ai --json` 和 `ai-sh suggest` 稳定机器接口
 - 自动收集 cwd、shell、OS、用户名和 PATH 中的关键工具
@@ -38,6 +39,18 @@ uv sync
 uv run ai --help
 uv run ai-sh --help
 ```
+
+在当前 Shell 会话加载 Widget：
+
+```bash
+# Bash
+eval "$(uv run ai-sh init bash)"
+
+# Zsh
+eval "$(uv run ai-sh init zsh)"
+```
+
+脚本只注册快捷键，不会修改 `.bashrc` 或 `.zshrc`。确认可用后，可由用户自行把对应的 `eval` 行加入 Shell 配置；正式安装后通常不需要其中的 `uv run`。
 
 首次使用前配置 API：
 
@@ -131,6 +144,38 @@ hard_block_enabled = true
 
 ## Usage
 
+### Shell Widget
+
+加载集成后，在正常 Shell 提示符中按 `Ctrl+G`：
+
+```text
+$ <Ctrl+G>
+ai> 找出当前目录下最大的十个文件
+
+safe · 查找并按大小排序文件
+$ find . -type f -printf '%s %p\n' | sort -nr | head -n 10
+```
+
+建议命令只写入 Bash 的 `READLINE_LINE` 或 Zsh 的 `BUFFER`，不会执行。用户可以继续编辑，最终由当前 Shell 在用户按 Enter 后执行。
+
+当输入行已经有命令时，Widget 会把它作为修改上下文：
+
+```text
+$ find src -type f <Ctrl+G>
+ai> 按修改时间倒序排列
+
+$ find src -type f -printf '%T@ %p\n' | sort -nr
+```
+
+自定义快捷键：
+
+```bash
+eval "$(ai-sh init bash --key-binding '\C-x\C-a')"
+eval "$(ai-sh init zsh --key-binding '^X^A')"
+```
+
+### CLI
+
 单次生成命令建议：
 
 ```bash
@@ -170,7 +215,7 @@ ai> 用 wc -l 统计一下行数
 1. 模型必须返回 JSON，其中包含 `risk_level`: `safe`、`caution` 或 `danger`。
 2. 本地正则和参数解析只硬拦截灾难级危险命令。
 3. `danger` 和命中本地硬拦截的命令直接拒绝。
-4. `safe` 和 `caution` 命令只展示建议与风险，不进入执行流程。
+4. `safe` 和 `caution` 命令只展示或填入当前 Shell；`caution` 会同时显示风险原因。
 5. 只有显式调用的 legacy REPL 暂时保留旧执行能力。
 
 本地硬拦截覆盖这些高风险模式：
@@ -229,6 +274,7 @@ src/ai_sh/
   llm.py        # SiliconFlow/OpenAI 兼容调用和 JSON 解析
   suggestion.py # 建议生成编排和最终安全归一化
   protocol.py   # Shell Widget 使用的版本化机器协议
+  shell/        # Bash Readline 和 Zsh ZLE 初始化脚本
   safety.py     # 本地危险命令检测
   executor.py   # legacy REPL 的 subprocess 执行
   history.py    # 建议历史和 legacy REPL 上下文
@@ -244,6 +290,6 @@ src/ai_sh/
 
 ## Status
 
-包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口。legacy REPL 只用于迁移兼容。
+包版本当前仍是 `0.1.0`，源码正在开发 v0.2。阶段一已经取消默认执行并统一结果模型；阶段二已经建立 `protocol_version=1` 的机器接口；阶段三已经实现 Bash Readline 和 Zsh ZLE Widget MVP。legacy REPL 只用于迁移兼容。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。目标逻辑和分阶段开发计划见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。
