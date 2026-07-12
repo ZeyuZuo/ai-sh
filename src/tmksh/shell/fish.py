@@ -36,6 +36,24 @@ if not set -q TMKSH_PYTHON
     set -g TMKSH_PYTHON @@TMKSH_PYTHON@@
 end
 
+function __tmksh_capture_command_start --on-event fish_preexec
+    set -g TMKSH_PENDING_COMMAND "$argv[1]"
+    set -g TMKSH_PENDING_CWD "$PWD"
+end
+
+function __tmksh_capture_command_end --on-event fish_postexec
+    set -l exit_status $status
+    if test $exit_status -ne 0; and set -q TMKSH_PENDING_COMMAND; and test -n "$TMKSH_PENDING_COMMAND"
+        set -g TMKSH_LAST_FAILED_COMMAND "$TMKSH_PENDING_COMMAND"
+        set -g TMKSH_LAST_FAILED_STATUS "$exit_status"
+        set -g TMKSH_LAST_FAILED_CWD "$TMKSH_PENDING_CWD"
+        set -g TMKSH_LAST_FAILED_SHELL fish
+    end
+    set -e TMKSH_PENDING_COMMAND
+    set -e TMKSH_PENDING_CWD
+    return $exit_status
+end
+
 function __tmksh_json_field
     "$TMKSH_PYTHON" -c '@@TMKSH_JSON_FIELD@@' "$argv[1]"
 end
@@ -62,8 +80,14 @@ function __tmksh_widget
     end
 
     set -l attempts 0
+    set -l failed_command "$TMKSH_LAST_FAILED_COMMAND"
+    set -l failed_status "$TMKSH_LAST_FAILED_STATUS"
+    set -l failed_cwd "$TMKSH_LAST_FAILED_CWD"
+    set -l failed_shell "$TMKSH_LAST_FAILED_SHELL"
     while test $attempts -lt 3
-        set -l response (printf '%s\0%s' "$request" "$original_buffer" \
+        set -l response (printf '%s\0%s\0%s\0%s\0%s\0%s' \
+            "$request" "$original_buffer" "$failed_command" \
+            "$failed_status" "$failed_cwd" "$failed_shell" \
             | "$TMKSH_COMMAND" suggest --input-format nul)
         set -l exit_status $status
 

@@ -37,6 +37,44 @@ if [[ -z ${TMKSH_PYTHON:-} ]]; then
     TMKSH_PYTHON=@@TMKSH_PYTHON@@
 fi
 
+TMKSH_COMMAND_CWD="${TMKSH_COMMAND_CWD:-$PWD}"
+
+__tmksh_capture_failed_command() {
+    local exit_status=$?
+    local command=""
+
+    if (( exit_status != 0 )); then
+        command="$(HISTTIMEFORMAT= builtin fc -ln -1 2>/dev/null)" || command=""
+        while [[ "$command" == [[:space:]]* ]]; do
+            command="${command:1}"
+        done
+        if [[ -n "$command" ]]; then
+            TMKSH_LAST_FAILED_COMMAND="$command"
+            TMKSH_LAST_FAILED_STATUS="$exit_status"
+            TMKSH_LAST_FAILED_CWD="${TMKSH_COMMAND_CWD:-$PWD}"
+            TMKSH_LAST_FAILED_SHELL="bash"
+        fi
+    fi
+    TMKSH_COMMAND_CWD="$PWD"
+    return "$exit_status"
+}
+
+__tmksh_install_prompt_hook() {
+    local declaration=""
+    local hook=""
+    declaration="$(declare -p PROMPT_COMMAND 2>/dev/null)"
+    if [[ "$declaration" == "declare -a"* ]]; then
+        for hook in "${PROMPT_COMMAND[@]}"; do
+            [[ "$hook" == "__tmksh_capture_failed_command" ]] && return 0
+        done
+        PROMPT_COMMAND=(__tmksh_capture_failed_command "${PROMPT_COMMAND[@]}")
+    elif [[ ";${PROMPT_COMMAND:-};" != *";__tmksh_capture_failed_command;"* ]]; then
+        PROMPT_COMMAND="__tmksh_capture_failed_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+    fi
+}
+
+__tmksh_install_prompt_hook
+
 __tmksh_json_field() {
     "$TMKSH_PYTHON" -c '@@TMKSH_JSON_FIELD@@' "$1"
 }
@@ -59,6 +97,10 @@ __tmksh_widget() {
     local REPLY=""
     local status=0
     local attempts=0
+    local failed_command="${TMKSH_LAST_FAILED_COMMAND:-}"
+    local failed_status="${TMKSH_LAST_FAILED_STATUS:-}"
+    local failed_cwd="${TMKSH_LAST_FAILED_CWD:-}"
+    local failed_shell="${TMKSH_LAST_FAILED_SHELL:-}"
 
     printf '\n'
     if ! __tmksh_read_input 'tmksh> '; then
@@ -75,7 +117,9 @@ __tmksh_widget() {
 
     while (( attempts < 3 )); do
         response="$(
-            printf '%s\0%s' "$request" "$original_line" \
+            printf '%s\0%s\0%s\0%s\0%s\0%s' \
+                "$request" "$original_line" "$failed_command" \
+                "$failed_status" "$failed_cwd" "$failed_shell" \
                 | "$TMKSH_COMMAND" suggest --input-format nul
         )"
         status=$?

@@ -21,6 +21,8 @@ def test_fish_init_command_outputs_commandline_script() -> None:
     assert 'commandline --replace "$generated_command"' in invocation.stdout
     assert "bind '\\cg' __tmksh_widget" in invocation.stdout
     assert "suggest --input-format nul" in invocation.stdout
+    assert "fish_preexec" in invocation.stdout
+    assert "fish_postexec" in invocation.stdout
 
 
 def test_fish_init_supports_custom_binding_and_quoted_path() -> None:
@@ -83,12 +85,87 @@ def test_fish_widget_preserves_protocol_and_buffer_semantics(
     assert message in completed.stdout
 
 
+@pytest.mark.skipif(FISH is None, reason="fish is not installed")
+def test_fish_failure_hooks_record_nonzero_command_state() -> None:
+    script = render_fish_init(command_path="tmksh", python_path=sys.executable)
+    shell_code = r"""
+source $argv[1]
+__tmksh_capture_command_start 'python missing.py'
+set -g TMKSH_PENDING_CWD '/tmp/original cwd'
+false
+__tmksh_capture_command_end
+printf '%s\0%s\0%s\0%s' "$TMKSH_LAST_FAILED_COMMAND" \
+    "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" \
+    "$TMKSH_LAST_FAILED_SHELL"
+"""
+    completed = subprocess.run(
+        [FISH, "--no-config", "--command", shell_code, "fish", "/dev/stdin"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.split("\0") == [
+        "python missing.py",
+        "1",
+        "/tmp/original cwd",
+        "fish",
+    ]
+
+
+@pytest.mark.skipif(FISH is None, reason="fish is not installed")
+def test_fish_widget_sends_failure_state_for_fix(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="/fix 不要使用 pip\n",
+        original_buffer="keep this",
+        original_cursor=4,
+        failed_command="python app.py",
+        failed_status=1,
+        failed_cwd="/tmp/demo project",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert _line_from_output(completed.stdout) == (
+        "fixed[fish:1:/tmp/demo project]: python app.py"
+    )
+
+
+@pytest.mark.skipif(FISH is None, reason="fish is not installed")
+def test_fish_fix_restores_buffer_for_missing_blocked_and_error(tmp_path) -> None:
+    cases = (
+        ("/fix\n", "", "没有找到最近失败的命令"),
+        ("/fix block\n", "bad command", "删除根目录"),
+        ("/fix error\n", "bad command", "连接 AI 服务失败"),
+    )
+    for request, failed_command, expected_message in cases:
+        completed = _run_widget(
+            tmp_path,
+            user_input=request,
+            original_buffer="keep this",
+            original_cursor=4,
+            failed_command=failed_command,
+            failed_status=1 if failed_command else None,
+            failed_cwd="/tmp/demo" if failed_command else "",
+        )
+
+        assert completed.returncode == 0, completed.stderr
+        assert expected_message in completed.stdout
+        assert _line_from_output(completed.stdout) == "keep this"
+        assert _point_from_output(completed.stdout) == 4
+
+
 def _run_widget(
     tmp_path: Path,
     *,
     user_input: str,
     original_buffer: str,
     original_cursor: int,
+    failed_command: str = "",
+    failed_status: int | None = None,
+    failed_cwd: str = "",
 ) -> subprocess.CompletedProcess[str]:
     assert FISH is not None
     backend = _write_fake_backend(tmp_path)
@@ -101,6 +178,12 @@ def _run_widget(
 set -g TEST_LINE $argv[2]
 set -g TEST_POINT $argv[3]
 source $argv[1]
+set -g TMKSH_LAST_FAILED_COMMAND $argv[4]
+set -g TMKSH_LAST_FAILED_STATUS $argv[5]
+set -g TMKSH_LAST_FAILED_CWD $argv[6]
+if test -n "$argv[4]"
+    set -g TMKSH_LAST_FAILED_SHELL fish
+end
 function commandline
     if test (count $argv) -eq 0
         printf '%s' "$TEST_LINE"
@@ -128,6 +211,9 @@ printf '__TMKSH_POINT__=%s\n' "$TEST_POINT"
             str(init_path),
             original_buffer,
             str(original_cursor),
+            failed_command,
+            "" if failed_status is None else str(failed_status),
+            failed_cwd,
         ],
         input=user_input,
         text=True,
@@ -153,9 +239,10 @@ if len(sys.argv) > 1 and sys.argv[1] == "_prompt":
     print(value.decode())
     raise SystemExit(0)
 
-request_bytes, buffer_bytes = sys.stdin.buffer.read().split(b"\\0", 1)
-request = request_bytes.decode()
-buffer = buffer_bytes.decode()
+parts = sys.stdin.buffer.read().split(b"\\0")
+request, buffer, failed_command, failed_status, failed_cwd, failed_shell = (
+    part.decode() for part in parts
+)
 response = {{
     "protocol_version": 1,
     "kind": "command",
@@ -168,7 +255,20 @@ response = {{
     "error": "",
 }}
 status = 0
-if "block" in request:
+if request.lower().startswith("/fix") and not failed_command:
+    response.update(kind="error", command="", error="没有找到最近失败的命令")
+    status = 32
+elif request.lower().startswith("/fix") and "block" in request:
+    response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
+    status = 31
+elif request.lower().startswith("/fix") and "error" in request:
+    response.update(kind="error", command="", error="连接 AI 服务失败")
+    status = 21
+elif request.lower().startswith("/fix"):
+    response.update(
+        command=f"fixed[{{failed_shell}}:{{failed_status}}:{{failed_cwd}}]: {{failed_command}}"
+    )
+elif "block" in request:
     response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
     status = 31
 elif "caution" in request:

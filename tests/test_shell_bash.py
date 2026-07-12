@@ -17,6 +17,8 @@ def test_bash_init_command_outputs_loadable_script() -> None:
     assert "bind -x" in invocation.stdout
     assert "suggest --input-format nul" in invocation.stdout
     assert '_prompt --label "$prompt"' in invocation.stdout
+    assert "__tmksh_capture_failed_command" in invocation.stdout
+    assert "PROMPT_COMMAND" in invocation.stdout
 
     syntax = subprocess.run(
         ["bash", "-n"],
@@ -123,12 +125,94 @@ def test_bash_widget_handles_clarification_in_same_interaction(tmp_path) -> None
     assert _line_from_output(completed.stdout) == "find . ./src"
 
 
+def test_bash_failure_hook_records_nonzero_command_state() -> None:
+    script = render_bash_init(command_path="tmksh", python_path=sys.executable)
+    shell_code = r"""
+set -o history
+source "$1"
+TMKSH_COMMAND_CWD='/tmp/original cwd'
+history -s 'python missing.py'
+(exit 7)
+__tmksh_capture_failed_command
+printf '%s\0%s\0%s\0%s' "$TMKSH_LAST_FAILED_COMMAND" \
+    "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" \
+    "$TMKSH_LAST_FAILED_SHELL"
+"""
+    completed = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-c", shell_code, "bash", "/dev/stdin"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.split("\0") == [
+        "(exit 7)",
+        "7",
+        "/tmp/original cwd",
+        "bash",
+    ]
+
+
+def test_bash_widget_sends_failure_state_for_fix(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="/fix 不要使用 pip\n",
+        original_line="keep this",
+        failed_command="python app.py",
+        failed_status=1,
+        failed_cwd="/tmp/demo project",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert _line_from_output(completed.stdout) == (
+        "fixed[bash:1:/tmp/demo project]: python app.py"
+    )
+
+
+def test_bash_fix_restores_buffer_without_failure_state(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="/fix\n",
+        original_line="keep this",
+        original_point=4,
+    )
+
+    assert "没有找到最近失败的命令" in completed.stdout
+    assert _line_from_output(completed.stdout) == "keep this"
+    assert _point_from_output(completed.stdout) == 4
+
+
+def test_bash_fix_restores_buffer_when_blocked_or_api_fails(tmp_path) -> None:
+    for request, expected_message in (
+        ("/fix block\n", "删除根目录"),
+        ("/fix error\n", "连接 AI 服务失败"),
+    ):
+        completed = _run_widget(
+            tmp_path,
+            user_input=request,
+            original_line="keep this",
+            original_point=4,
+            failed_command="bad command",
+            failed_status=1,
+            failed_cwd="/tmp/demo",
+        )
+
+        assert expected_message in completed.stdout
+        assert _line_from_output(completed.stdout) == "keep this"
+        assert _point_from_output(completed.stdout) == 4
+
+
 def _run_widget(
     tmp_path: Path,
     *,
     user_input: str,
     original_line: str,
     original_point: int | None = None,
+    failed_command: str = "",
+    failed_status: int | None = None,
+    failed_cwd: str = "",
 ) -> subprocess.CompletedProcess[str]:
     backend = _write_fake_backend(tmp_path)
     init_path = tmp_path / "bash-init.sh"
@@ -143,6 +227,10 @@ def _run_widget(
 source "$1"
 READLINE_LINE="$2"
 READLINE_POINT=$3
+TMKSH_LAST_FAILED_COMMAND="$4"
+TMKSH_LAST_FAILED_STATUS="$5"
+TMKSH_LAST_FAILED_CWD="$6"
+TMKSH_LAST_FAILED_SHELL="${4:+bash}"
 __tmksh_widget
 printf '\n__TMKSH_LINE__=%s\n' "$READLINE_LINE"
 printf '__TMKSH_POINT__=%s\n' "$READLINE_POINT"
@@ -158,6 +246,9 @@ printf '__TMKSH_POINT__=%s\n' "$READLINE_POINT"
             str(init_path),
             original_line,
             str(len(original_line) if original_point is None else original_point),
+            failed_command,
+            "" if failed_status is None else str(failed_status),
+            failed_cwd,
         ],
         input=user_input,
         text=True,
@@ -183,9 +274,10 @@ if len(sys.argv) > 1 and sys.argv[1] == "_prompt":
     print(value.decode())
     raise SystemExit(0)
 
-request_bytes, buffer_bytes = sys.stdin.buffer.read().split(b"\\0", 1)
-request = request_bytes.decode()
-buffer = buffer_bytes.decode()
+parts = sys.stdin.buffer.read().split(b"\\0")
+request, buffer, failed_command, failed_status, failed_cwd, failed_shell = (
+    part.decode() for part in parts
+)
 response = {{
     "protocol_version": 1,
     "kind": "command",
@@ -198,7 +290,20 @@ response = {{
     "error": "",
 }}
 status = 0
-if "block" in request:
+if request.lower().startswith("/fix") and not failed_command:
+    response.update(kind="error", command="", error="没有找到最近失败的命令")
+    status = 32
+elif request.lower().startswith("/fix") and "block" in request:
+    response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
+    status = 31
+elif request.lower().startswith("/fix") and "error" in request:
+    response.update(kind="error", command="", error="连接 AI 服务失败")
+    status = 21
+elif request.lower().startswith("/fix"):
+    response.update(
+        command=f"fixed[{{failed_shell}}:{{failed_status}}:{{failed_cwd}}]: {{failed_command}}"
+    )
+elif "block" in request:
     response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
     status = 31
 elif "caution" in request:

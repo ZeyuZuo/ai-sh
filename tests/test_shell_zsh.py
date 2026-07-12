@@ -21,6 +21,8 @@ def test_zsh_init_command_outputs_zle_script() -> None:
     assert "zle -N __tmksh_widget" in invocation.stdout
     assert "bindkey '^G' __tmksh_widget" in invocation.stdout
     assert "suggest --input-format nul" in invocation.stdout
+    assert "__tmksh_capture_command_start" in invocation.stdout
+    assert "__tmksh_capture_command_end" in invocation.stdout
 
 
 def test_zsh_init_supports_custom_binding_and_quoted_path() -> None:
@@ -43,7 +45,10 @@ def test_shell_widgets_share_protocol_and_safety_semantics() -> None:
 
     for script in scripts:
         assert "suggest --input-format nul" in script
-        assert "printf '%s\\0%s'" in script
+        assert "printf '%s\\0%s\\0%s\\0%s\\0%s\\0%s'" in script
+        assert "LAST_FAILED_COMMAND" in script
+        assert "LAST_FAILED_STATUS" in script
+        assert "LAST_FAILED_CWD" in script
         assert any(
             marker in script
             for marker in ("status == 0", "exit_status == 0", "$exit_status -eq 0")
@@ -136,12 +141,98 @@ def test_zsh_widget_restores_buffer_and_cursor_on_api_error(tmp_path) -> None:
     assert _point_from_output(completed.stdout) == 3
 
 
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_failure_hooks_record_nonzero_command_state() -> None:
+    script = render_zsh_init(command_path="tmksh", python_path=sys.executable)
+    shell_code = r"""
+source "$1"
+__tmksh_capture_command_start 'python missing.py'
+TMKSH_PENDING_CWD='/tmp/original cwd'
+(exit 7)
+__tmksh_capture_command_end
+print -rn -- "$TMKSH_LAST_FAILED_COMMAND\0$TMKSH_LAST_FAILED_STATUS\0$TMKSH_LAST_FAILED_CWD\0$TMKSH_LAST_FAILED_SHELL"
+"""
+    completed = subprocess.run(
+        [ZSH, "-f", "-c", shell_code, "zsh", "/dev/stdin"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.split("\0") == [
+        "python missing.py",
+        "7",
+        "/tmp/original cwd",
+        "zsh",
+    ]
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_sends_failure_state_for_fix(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="/fix 不要使用 pip\n",
+        original_buffer="keep this",
+        failed_command="python app.py",
+        failed_status=1,
+        failed_cwd="/tmp/demo project",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert _line_from_output(completed.stdout) == (
+        "fixed[zsh:1:/tmp/demo project]: python app.py"
+    )
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_fix_restores_buffer_for_missing_blocked_and_error(tmp_path) -> None:
+    cases = (
+        ("/fix\n", "", "没有找到最近失败的命令"),
+        ("/fix block\n", "bad command", "删除根目录"),
+        ("/fix error\n", "bad command", "连接 AI 服务失败"),
+    )
+    for request, failed_command, expected_message in cases:
+        completed = _run_widget(
+            tmp_path,
+            user_input=request,
+            original_buffer="keep this",
+            original_cursor=4,
+            failed_command=failed_command,
+            failed_status=1 if failed_command else None,
+            failed_cwd="/tmp/demo" if failed_command else "",
+        )
+
+        assert completed.returncode == 0, completed.stderr
+        assert expected_message in completed.stdout
+        assert _line_from_output(completed.stdout) == "keep this"
+        assert _point_from_output(completed.stdout) == 4
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_restores_buffer_when_cancelled(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="\n",
+        original_buffer="keep this",
+        original_cursor=4,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert _line_from_output(completed.stdout) == "keep this"
+    assert _point_from_output(completed.stdout) == 4
+
+
 def _run_widget(
     tmp_path: Path,
     *,
     user_input: str,
     original_buffer: str,
     original_cursor: int | None = None,
+    failed_command: str = "",
+    failed_status: int | None = None,
+    failed_cwd: str = "",
 ) -> subprocess.CompletedProcess[str]:
     assert ZSH is not None
     backend = _write_fake_backend(tmp_path)
@@ -157,6 +248,10 @@ def _run_widget(
 source "$1"
 BUFFER="$2"
 CURSOR=$3
+TMKSH_LAST_FAILED_COMMAND="$4"
+TMKSH_LAST_FAILED_STATUS="$5"
+TMKSH_LAST_FAILED_CWD="$6"
+TMKSH_LAST_FAILED_SHELL="${4:+zsh}"
 __tmksh_widget
 print -r -- "__TMKSH_LINE__=$BUFFER"
 print -r -- "__TMKSH_POINT__=$CURSOR"
@@ -171,6 +266,9 @@ print -r -- "__TMKSH_POINT__=$CURSOR"
             str(init_path),
             original_buffer,
             str(len(original_buffer) if original_cursor is None else original_cursor),
+            failed_command,
+            "" if failed_status is None else str(failed_status),
+            failed_cwd,
         ],
         input=user_input,
         text=True,
@@ -185,9 +283,10 @@ def _write_fake_backend(tmp_path: Path) -> Path:
 import json
 import sys
 
-request_bytes, buffer_bytes = sys.stdin.buffer.read().split(b"\\0", 1)
-request = request_bytes.decode()
-buffer = buffer_bytes.decode()
+parts = sys.stdin.buffer.read().split(b"\\0")
+request, buffer, failed_command, failed_status, failed_cwd, failed_shell = (
+    part.decode() for part in parts
+)
 response = {{
     "protocol_version": 1,
     "kind": "command",
@@ -200,7 +299,20 @@ response = {{
     "error": "",
 }}
 status = 0
-if "block" in request:
+if request.lower().startswith("/fix") and not failed_command:
+    response.update(kind="error", command="", error="没有找到最近失败的命令")
+    status = 32
+elif request.lower().startswith("/fix") and "block" in request:
+    response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
+    status = 31
+elif request.lower().startswith("/fix") and "error" in request:
+    response.update(kind="error", command="", error="连接 AI 服务失败")
+    status = 21
+elif request.lower().startswith("/fix"):
+    response.update(
+        command=f"fixed[{{failed_shell}}:{{failed_status}}:{{failed_cwd}}]: {{failed_command}}"
+    )
+elif "block" in request:
     response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
     status = 31
 elif "caution" in request:

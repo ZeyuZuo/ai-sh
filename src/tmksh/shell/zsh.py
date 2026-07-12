@@ -36,6 +36,32 @@ if [[ -z ${TMKSH_PYTHON:-} ]]; then
     typeset -g TMKSH_PYTHON=@@TMKSH_PYTHON@@
 fi
 
+autoload -Uz add-zsh-hook
+
+__tmksh_capture_command_start() {
+    typeset -g TMKSH_PENDING_COMMAND="$1"
+    typeset -g TMKSH_PENDING_CWD="$PWD"
+}
+
+__tmksh_capture_command_end() {
+    local -i exit_status=$?
+    if (( exit_status != 0 )) && [[ -n ${TMKSH_PENDING_COMMAND:-} ]]; then
+        typeset -g TMKSH_LAST_FAILED_COMMAND="$TMKSH_PENDING_COMMAND"
+        typeset -g TMKSH_LAST_FAILED_STATUS="$exit_status"
+        typeset -g TMKSH_LAST_FAILED_CWD="${TMKSH_PENDING_CWD:-$PWD}"
+        typeset -g TMKSH_LAST_FAILED_SHELL="zsh"
+    fi
+    typeset -g TMKSH_PENDING_COMMAND=""
+    typeset -g TMKSH_PENDING_CWD=""
+    return $exit_status
+}
+
+add-zsh-hook -d preexec __tmksh_capture_command_start 2>/dev/null
+add-zsh-hook preexec __tmksh_capture_command_start
+# This hook must run first so another precmd hook cannot overwrite `$?`.
+precmd_functions=(${precmd_functions:#__tmksh_capture_command_end})
+precmd_functions=(__tmksh_capture_command_end $precmd_functions)
+
 __tmksh_json_field() {
     "$TMKSH_PYTHON" -c '@@TMKSH_JSON_FIELD@@' "$1"
 }
@@ -80,6 +106,10 @@ __tmksh_widget() {
     local REPLY=""
     local -i exit_status=0
     local -i attempts=0
+    local failed_command="${TMKSH_LAST_FAILED_COMMAND:-}"
+    local failed_status="${TMKSH_LAST_FAILED_STATUS:-}"
+    local failed_cwd="${TMKSH_LAST_FAILED_CWD:-}"
+    local failed_shell="${TMKSH_LAST_FAILED_SHELL:-}"
 
     if ! __tmksh_read_input 'tmksh> '; then
         BUFFER="$original_buffer"
@@ -95,7 +125,9 @@ __tmksh_widget() {
 
     while (( attempts < 3 )); do
         response="$(
-            printf '%s\0%s' "$request" "$original_buffer" \
+            printf '%s\0%s\0%s\0%s\0%s\0%s' \
+                "$request" "$original_buffer" "$failed_command" \
+                "$failed_status" "$failed_cwd" "$failed_shell" \
                 | "$TMKSH_COMMAND" suggest --input-format nul
         )"
         exit_status=$?
