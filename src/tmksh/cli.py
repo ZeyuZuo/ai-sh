@@ -19,6 +19,7 @@ from tmksh.config import (
 )
 from tmksh.exceptions import TmkshError, ApiError, ConfigError
 from tmksh.history import HistoryStore, new_history_entry
+from tmksh.interaction import FailedCommandContext, parse_user_directive
 from tmksh.protocol import (
     ProtocolExitCode,
     ProtocolInputError,
@@ -32,7 +33,7 @@ from tmksh.protocol import (
 )
 from tmksh.shell import render_bash_init, render_fish_init, render_zsh_init
 from tmksh.shell.prompt import prompt_from_tty
-from tmksh.suggestion import create_suggestion
+from tmksh.suggestion import create_fix_suggestion, create_suggestion
 from tmksh.ui import console, render_error, render_result
 
 
@@ -165,6 +166,7 @@ def suggest_machine(input_format: str) -> None:
     response, exit_code = _machine_suggestion_response(
         protocol_request.request,
         current_command=protocol_request.buffer,
+        failed_command=protocol_request.failed_command,
     )
     _emit_protocol_response(response, exit_code)
 
@@ -230,18 +232,35 @@ def _machine_suggestion_response(
     *,
     current_command: str = "",
     stdin_context: str = "",
+    failed_command: FailedCommandContext | None = None,
 ) -> tuple[ProtocolResponse, ProtocolExitCode]:
     config: Config | None = None
     try:
-        validate_protocol_fields(request, current_command)
+        validate_protocol_fields(request, current_command, failed_command)
+        directive = parse_user_directive(request)
+        if directive.kind == "fix" and failed_command is None:
+            return (
+                ProtocolResponse.error_response(
+                    "没有找到最近失败的命令。请先运行命令，或直接描述需要修复的问题。"
+                ),
+                ProtocolExitCode.MISSING_CONTEXT,
+            )
         config = load_config()
         validate_api_config(config)
-        suggestion = create_suggestion(
-            config,
-            request,
-            stdin_context=stdin_context,
-            current_command=current_command,
-        )
+        if directive.kind == "fix":
+            assert failed_command is not None
+            suggestion = create_fix_suggestion(
+                config,
+                failed_command,
+                supplemental=directive.argument,
+            )
+        else:
+            suggestion = create_suggestion(
+                config,
+                directive.argument,
+                stdin_context=stdin_context,
+                current_command=current_command,
+            )
         return (
             ProtocolResponse.from_result(suggestion.result),
             exit_code_for_result(suggestion.result),

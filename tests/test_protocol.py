@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from tmksh.cli import tmksh
 from tmksh.config import ApiConfig, BehaviorConfig, Config
 from tmksh.exceptions import ApiError, ConfigError
+from tmksh.interaction import FailedCommandContext
 from tmksh.llm import AssistantResult
 from tmksh.protocol import (
     MAX_BUFFER_CHARS,
@@ -308,11 +309,120 @@ def test_nul_protocol_preserves_request_and_buffer() -> None:
 
     assert parsed.request == request
     assert parsed.buffer == buffer
+    assert parsed.failed_command is None
 
 
-def test_nul_protocol_requires_exactly_two_fields() -> None:
-    with pytest.raises(ProtocolInputError, match="两个字段"):
+def test_json_protocol_accepts_optional_failed_command_context() -> None:
+    payload = json.dumps(
+        {
+            "protocol_version": PROTOCOL_VERSION,
+            "request": "/fix 不要使用 pip",
+            "buffer": "keep this",
+            "failed_command": {
+                "command": "python app.py",
+                "exit_code": 1,
+                "cwd": "/tmp/demo",
+                "shell": "bash",
+            },
+        }
+    )
+
+    parsed = read_protocol_request(BytesIO(payload.encode()))
+
+    assert parsed.failed_command == FailedCommandContext(
+        command="python app.py",
+        exit_code=1,
+        cwd="/tmp/demo",
+        shell="bash",
+    )
+
+
+def test_extended_nul_protocol_preserves_failed_command_context() -> None:
+    payload = b"\0".join(
+        [b"/fix", b"keep this", b"uv run pytest", b"1", b"/tmp/demo", b"zsh"]
+    )
+
+    parsed = read_nul_protocol_request(BytesIO(payload))
+
+    assert parsed.failed_command == FailedCommandContext(
+        command="uv run pytest",
+        exit_code=1,
+        cwd="/tmp/demo",
+        shell="zsh",
+    )
+
+
+def test_nul_protocol_requires_two_or_six_fields() -> None:
+    with pytest.raises(ProtocolInputError, match="2 个或 6 个字段"):
         read_nul_protocol_request(BytesIO(b"request-only"))
+
+
+def test_extended_nul_protocol_rejects_partial_failed_context() -> None:
+    with pytest.raises(ProtocolInputError, match="exit_code"):
+        read_nul_protocol_request(BytesIO(b"/fix\0\0failed\0\0/tmp\0bash"))
+
+
+def test_fix_without_failed_command_is_local_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: pytest.fail("missing failure state must not load config"),
+    )
+
+    invocation = _invoke_suggest(request="/fix", buffer="keep this")
+
+    assert invocation.exit_code == ProtocolExitCode.MISSING_CONTEXT
+    response = json.loads(invocation.stdout)
+    assert response["kind"] == "error"
+    assert "没有找到最近失败的命令" in response["error"]
+
+
+def test_fix_uses_dedicated_path_and_ignores_current_buffer(
+    monkeypatch, tmp_path
+) -> None:
+    failed = FailedCommandContext(
+        command="python app.py",
+        exit_code=1,
+        cwd="/tmp/demo",
+        shell="bash",
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(
+        "tmksh.cli.create_suggestion",
+        lambda *args, **kwargs: pytest.fail("/fix must not use normal suggestion path"),
+    )
+
+    def fake_fix(config, failed_command, *, supplemental=""):
+        captured.update(failed=failed_command, supplemental=supplemental)
+        return Suggestion(
+            AssistantResult(
+                command="uv run python app.py",
+                explanation="使用项目环境运行。",
+                risk_level="safe",
+            ),
+            {"cwd": failed_command.cwd},
+        )
+
+    monkeypatch.setattr("tmksh.cli.create_fix_suggestion", fake_fix)
+    payload = json.dumps(
+        {
+            "protocol_version": PROTOCOL_VERSION,
+            "request": "/fix 不要使用系统 Python",
+            "buffer": "do not modify this as a command target",
+            "failed_command": {
+                "command": failed.command,
+                "exit_code": failed.exit_code,
+                "cwd": failed.cwd,
+                "shell": failed.shell,
+            },
+        }
+    )
+
+    invocation = CliRunner().invoke(tmksh, ["suggest"], input=payload)
+
+    assert invocation.exit_code == ProtocolExitCode.SUCCESS
+    assert captured == {"failed": failed, "supplemental": "不要使用系统 Python"}
+    assert json.loads(invocation.stdout)["command"] == "uv run python app.py"
 
 
 def test_suggest_cli_accepts_nul_transport(monkeypatch, tmp_path) -> None:

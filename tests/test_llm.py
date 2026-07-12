@@ -13,8 +13,10 @@ from openai import (
 
 from tmksh.config import ApiConfig, Config
 from tmksh.exceptions import ApiError
+from tmksh.interaction import FailedCommandContext
 from tmksh.llm import (
     build_answer_messages,
+    build_fix_messages,
     build_messages,
     generate_answer,
     generate_command,
@@ -87,6 +89,30 @@ def test_system_prompt_defines_path_and_scope_semantics() -> None:
     assert "先汇总完整结果再做一次全局排序" in prompt
     assert "-printf '%T@ %p\\n' | sort -rn" in prompt
     assert "保留原路径、范围、参数和过滤条件" in prompt
+
+
+def test_fix_messages_include_only_explicit_failure_context() -> None:
+    messages = build_fix_messages(
+        FailedCommandContext(
+            command="python app.py",
+            exit_code=1,
+            cwd="/tmp/project",
+            shell="fish",
+        ),
+        {"cwd": "/tmp/project", "shell": "fish", "os": {"system": "Linux"}},
+        supplemental="报错是 No module named yaml，不要使用 pip",
+        language="zh",
+    )
+
+    assert "命令修复助手" in messages[0]["content"]
+    assert "不得假装看到了错误输出" in messages[0]["content"]
+    content = messages[1]["content"]
+    assert '"command": "python app.py"' in content
+    assert '"exit_code": 1' in content
+    assert '"cwd": "/tmp/project"' in content
+    assert '"shell": "fish"' in content
+    assert "No module named yaml" in content
+    assert "stdout" in content
 
 
 def test_parse_answer_result() -> None:

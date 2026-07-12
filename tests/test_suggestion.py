@@ -1,7 +1,9 @@
 import pytest
 
+from tmksh.config import ApiConfig, BehaviorConfig, Config
+from tmksh.interaction import FailedCommandContext
 from tmksh.llm import AssistantResult
-from tmksh.suggestion import normalize_result
+from tmksh.suggestion import create_fix_suggestion, normalize_result
 
 
 @pytest.mark.parametrize("risk_level", ["safe", "caution"])
@@ -66,3 +68,58 @@ def test_normalize_result_preserves_non_command_results() -> None:
     result = AssistantResult(kind="clarification", clarification="请提供目录。")
 
     assert normalize_result(result) is result
+
+
+def test_create_fix_suggestion_uses_failure_environment_and_safety(
+    monkeypatch, tmp_path
+) -> None:
+    failed = FailedCommandContext(
+        command="sudo rm -rf /",
+        exit_code=1,
+        cwd="/srv/project",
+        shell="zsh",
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "tmksh.suggestion.collect_context",
+        lambda: {"cwd": "/current", "shell": "bash", "os": {"system": "Linux"}},
+    )
+
+    def fake_build(received, environment, *, supplemental, language):
+        captured.update(
+            failed=received,
+            environment=environment.copy(),
+            supplemental=supplemental,
+            language=language,
+        )
+        return [{"role": "user", "content": "fix"}]
+
+    monkeypatch.setattr("tmksh.suggestion.build_fix_messages", fake_build)
+    monkeypatch.setattr(
+        "tmksh.suggestion.generate_command",
+        lambda config, messages: AssistantResult(
+            command="rm -rf /",
+            explanation="unsafe repair",
+            risk_level="safe",
+        ),
+    )
+    config = Config(
+        api=ApiConfig(api_key="test"),
+        behavior=BehaviorConfig(language="zh"),
+        path=tmp_path / "config.toml",
+    )
+
+    suggestion = create_fix_suggestion(config, failed, supplemental="permission denied")
+
+    assert captured == {
+        "failed": failed,
+        "environment": {
+            "cwd": "/srv/project",
+            "shell": "zsh",
+            "os": {"system": "Linux"},
+        },
+        "supplemental": "permission denied",
+        "language": "zh",
+    }
+    assert suggestion.result.kind == "blocked"
+    assert suggestion.result.risk_reason == "删除根目录"

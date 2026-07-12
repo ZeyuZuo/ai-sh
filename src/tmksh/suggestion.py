@@ -6,7 +6,13 @@ from dataclasses import dataclass
 
 from tmksh.config import Config
 from tmksh.context import collect_context
-from tmksh.llm import AssistantResult, build_messages, generate_command
+from tmksh.interaction import FailedCommandContext
+from tmksh.llm import (
+    AssistantResult,
+    build_fix_messages,
+    build_messages,
+    generate_command,
+)
 from tmksh.safety import check_command
 
 
@@ -33,6 +39,27 @@ def create_suggestion(
         environment,
         stdin_context=stdin_context,
         current_command=current_command,
+        language=config.behavior.language,
+    )
+    result = normalize_result(generate_command(config, messages))
+    return Suggestion(result=result, environment=environment)
+
+
+def create_fix_suggestion(
+    config: Config,
+    failed_command: FailedCommandContext,
+    *,
+    supplemental: str = "",
+) -> Suggestion:
+    """Generate a safe replacement for one shell-captured failed command."""
+
+    environment = collect_context()
+    environment["cwd"] = failed_command.cwd
+    environment["shell"] = failed_command.shell
+    messages = build_fix_messages(
+        failed_command,
+        environment,
+        supplemental=supplemental,
         language=config.behavior.language,
     )
     result = normalize_result(generate_command(config, messages))
