@@ -2,6 +2,19 @@
 
 本项目的主要变化记录在此文件中。
 
+## Unreleased
+
+### Added
+
+- 在统一 `tmksh>` 提示符中增加 `/fix [补充信息]`，修复最近一条非零退出命令。
+- Bash、Zsh 和 Fish 集成会在本地保存最近失败命令、退出码、执行目录和 Shell 类型。
+- `protocol_version=1` 增加可选 `failed_command` 上下文，并保持旧 JSON 和双字段 NUL 客户端兼容。
+
+### Security
+
+- `/fix` 结果经过与普通建议相同的 AI danger 判断和本地硬拦截。
+- 失败状态钩子不捕获、不持久化也不上传 stdout/stderr；错误、取消和拦截不会修改原 buffer。
+
 ## 0.2.1 - 2026-07-12
 
 ### Fixed
