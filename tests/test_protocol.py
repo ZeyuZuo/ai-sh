@@ -7,15 +7,17 @@ from click.testing import CliRunner
 from tmksh.cli import tmksh
 from tmksh.config import ApiConfig, BehaviorConfig, Config
 from tmksh.exceptions import ApiError, ConfigError
-from tmksh.interaction import FailedCommandContext
+from tmksh.interaction import HELP_TEXT, FailedCommandContext
 from tmksh.llm import AssistantResult
 from tmksh.protocol import (
     MAX_BUFFER_CHARS,
+    MAX_LAST_COMMAND_CHARS,
     MAX_PROTOCOL_INPUT_BYTES,
     MAX_REQUEST_CHARS,
     PROTOCOL_VERSION,
     ProtocolExitCode,
     ProtocolInputError,
+    ProtocolResponse,
     read_nul_protocol_request,
     read_protocol_request,
     redact_sensitive,
@@ -187,7 +189,7 @@ def test_suggest_protocol_redacts_api_key_from_api_errors(
     monkeypatch.setattr(
         "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            ApiError(f"Bearer {secret}; api_key={secret}")
+            ApiError(f"provider echoed {secret}")
         ),
     )
 
@@ -257,12 +259,20 @@ def test_suggest_protocol_returns_json_when_interrupted(monkeypatch, tmp_path) -
         json.dumps({"protocol_version": 2, "request": "test"}),
         json.dumps({"protocol_version": 1, "request": ""}),
         json.dumps({"protocol_version": 1, "request": "test", "buffer": 1}),
+        json.dumps({"protocol_version": 1, "request": "test", "last_command": 1}),
         json.dumps({"protocol_version": 1, "request": "x" * (MAX_REQUEST_CHARS + 1)}),
         json.dumps(
             {
                 "protocol_version": 1,
                 "request": "test",
                 "buffer": "x" * (MAX_BUFFER_CHARS + 1),
+            }
+        ),
+        json.dumps(
+            {
+                "protocol_version": 1,
+                "request": "test",
+                "last_command": "x" * (MAX_LAST_COMMAND_CHARS + 1),
             }
         ),
     ],
@@ -310,6 +320,7 @@ def test_nul_protocol_preserves_request_and_buffer() -> None:
     assert parsed.request == request
     assert parsed.buffer == buffer
     assert parsed.failed_command is None
+    assert parsed.last_command == ""
 
 
 def test_json_protocol_accepts_optional_failed_command_context() -> None:
@@ -350,16 +361,242 @@ def test_extended_nul_protocol_preserves_failed_command_context() -> None:
         cwd="/tmp/demo",
         shell="zsh",
     )
+    assert parsed.last_command == ""
 
 
-def test_nul_protocol_requires_two_or_six_fields() -> None:
-    with pytest.raises(ProtocolInputError, match="2 个或 6 个字段"):
+def test_json_protocol_accepts_optional_last_command() -> None:
+    payload = json.dumps(
+        {
+            "protocol_version": PROTOCOL_VERSION,
+            "request": "/explain",
+            "buffer": "",
+            "last_command": "git status --short",
+        }
+    )
+
+    parsed = read_protocol_request(BytesIO(payload.encode()))
+
+    assert parsed.last_command == "git status --short"
+
+
+def test_seven_field_nul_protocol_preserves_last_command() -> None:
+    payload = b"\0".join(
+        [
+            b"/check",
+            b"",
+            b"uv run pytest",
+            b"1",
+            b"/tmp/demo",
+            b"bash",
+            b"git status --short",
+        ]
+    )
+
+    parsed = read_nul_protocol_request(BytesIO(payload))
+
+    assert parsed.failed_command == FailedCommandContext(
+        command="uv run pytest",
+        exit_code=1,
+        cwd="/tmp/demo",
+        shell="bash",
+    )
+    assert parsed.last_command == "git status --short"
+
+
+def test_nul_protocol_requires_two_six_or_seven_fields() -> None:
+    with pytest.raises(ProtocolInputError, match="2 个、6 个或 7 个字段"):
         read_nul_protocol_request(BytesIO(b"request-only"))
 
 
 def test_extended_nul_protocol_rejects_partial_failed_context() -> None:
     with pytest.raises(ProtocolInputError, match="exit_code"):
         read_nul_protocol_request(BytesIO(b"/fix\0\0failed\0\0/tmp\0bash"))
+
+
+def test_protocol_response_never_exposes_command_for_text_results() -> None:
+    response = ProtocolResponse.from_result(
+        AssistantResult(
+            kind="answer",
+            command="rm -rf /",
+            answer="这是一段文本回答。",
+        )
+    )
+
+    assert response.kind == "answer"
+    assert response.command == ""
+    assert response.answer == "这是一段文本回答。"
+
+
+def test_help_is_local_text_without_loading_config(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: pytest.fail("/help must not load config"),
+    )
+
+    invocation = _invoke_suggest(request="/HELP", buffer="keep this")
+
+    assert invocation.exit_code == ProtocolExitCode.SUCCESS
+    response = json.loads(invocation.stdout)
+    assert response["kind"] == "answer"
+    assert response["answer"] == HELP_TEXT
+    assert response["command"] == ""
+
+
+def test_unknown_directive_is_local_error_with_help(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: pytest.fail("unknown directives must not load config"),
+    )
+
+    invocation = _invoke_suggest(request="/expalin", buffer="keep this")
+
+    assert invocation.exit_code == ProtocolExitCode.INVALID_REQUEST
+    error = json.loads(invocation.stdout)["error"]
+    assert "未知指令：/expalin" in error
+    assert "你是否想使用：/explain" in error
+    assert HELP_TEXT in error
+
+
+@pytest.mark.parametrize(
+    ("directive_text", "usage"),
+    [("/new", "/new <任务>"), ("/ask", "/ask <问题>")],
+)
+def test_directives_with_required_arguments_fail_before_config(
+    monkeypatch, directive_text: str, usage: str
+) -> None:
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: pytest.fail("missing directive arguments must not load config"),
+    )
+
+    invocation = _invoke_suggest(request=directive_text)
+
+    assert invocation.exit_code == ProtocolExitCode.INVALID_REQUEST
+    assert usage in json.loads(invocation.stdout)["error"]
+
+
+@pytest.mark.parametrize("directive_text", ["/explain", "/check"])
+def test_command_analysis_without_a_target_fails_before_config(
+    monkeypatch, directive_text: str
+) -> None:
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: pytest.fail("missing analysis targets must not load config"),
+    )
+
+    invocation = _invoke_suggest(
+        request=directive_text,
+        buffer="   ",
+        last_command="",
+    )
+
+    assert invocation.exit_code == ProtocolExitCode.MISSING_CONTEXT
+    assert "没有找到可分析的命令" in json.loads(invocation.stdout)["error"]
+
+
+@pytest.mark.parametrize("operation", ["explain", "check"])
+@pytest.mark.parametrize(
+    ("buffer", "last_command", "expected_command"),
+    [
+        ("git diff --stat", "git status --short", "git diff --stat"),
+        ("   ", "git status --short", "git status --short"),
+    ],
+)
+def test_command_analysis_selects_buffer_then_last_command(
+    monkeypatch,
+    tmp_path,
+    operation: str,
+    buffer: str,
+    last_command: str,
+    expected_command: str,
+) -> None:
+    captured: dict[str, str] = {}
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+
+    def fake_analysis(config, received_operation, command, *, focus=""):
+        captured.update(operation=received_operation, command=command, focus=focus)
+        return Suggestion(
+            AssistantResult(kind="answer", answer="分析完成。", risk_level="safe"),
+            {},
+        )
+
+    monkeypatch.setattr("tmksh.cli.create_command_analysis", fake_analysis)
+
+    invocation = _invoke_suggest(
+        request=f"/{operation} 重点",
+        buffer=buffer,
+        last_command=last_command,
+    )
+
+    assert invocation.exit_code == ProtocolExitCode.SUCCESS
+    assert captured == {
+        "operation": operation,
+        "command": expected_command,
+        "focus": "重点",
+    }
+    assert json.loads(invocation.stdout)["answer"] == "分析完成。"
+
+
+def test_new_directive_never_sends_the_current_buffer(monkeypatch, tmp_path) -> None:
+    captured: dict[str, str] = {}
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+
+    def fake_create(config, request, *, current_command="", **kwargs):
+        captured.update(request=request, current_command=current_command)
+        return Suggestion(
+            AssistantResult(
+                command="lsof -i :8080",
+                explanation="查找监听端口的进程。",
+                risk_level="safe",
+            ),
+            {},
+        )
+
+    monkeypatch.setattr("tmksh.cli.create_suggestion", fake_create)
+
+    invocation = _invoke_suggest(
+        request="/new 查找监听 8080 端口的进程",
+        buffer="git status --short",
+        last_command="git log -1",
+    )
+
+    assert invocation.exit_code == ProtocolExitCode.SUCCESS
+    assert captured == {
+        "request": "查找监听 8080 端口的进程",
+        "current_command": "",
+    }
+
+
+def test_widget_ask_uses_only_the_plain_text_answer_path(monkeypatch, tmp_path) -> None:
+    captured: dict[str, str] = {}
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(
+        "tmksh.cli.create_suggestion",
+        lambda *args, **kwargs: pytest.fail("/ask must not generate a command"),
+    )
+    monkeypatch.setattr(
+        "tmksh.cli.create_command_analysis",
+        lambda *args, **kwargs: pytest.fail("/ask must not analyze a command"),
+    )
+
+    def fake_answer(config, question, **kwargs):
+        captured.update(question=question, stdin_context=kwargs["stdin_context"])
+        return "Git rebase 会重写提交历史。"
+
+    monkeypatch.setattr("tmksh.cli.create_answer", fake_answer)
+
+    invocation = _invoke_suggest(
+        request="/ask git rebase 是什么？",
+        buffer="rm -rf ./build",
+        last_command="git status --short",
+    )
+
+    assert invocation.exit_code == ProtocolExitCode.SUCCESS
+    response = json.loads(invocation.stdout)
+    assert response["kind"] == "answer"
+    assert response["answer"] == "Git rebase 会重写提交历史。"
+    assert response["command"] == ""
+    assert captured == {"question": "git rebase 是什么？", "stdin_context": ""}
 
 
 def test_fix_without_failed_command_is_local_error(monkeypatch) -> None:
@@ -453,12 +690,15 @@ def test_suggest_cli_accepts_nul_transport(monkeypatch, tmp_path) -> None:
     assert json.loads(invocation.stdout)["kind"] == "command"
 
 
-def _invoke_suggest(*, request: str = "列出文件", buffer: str = ""):
+def _invoke_suggest(
+    *, request: str = "列出文件", buffer: str = "", last_command: str = ""
+):
     payload = json.dumps(
         {
             "protocol_version": PROTOCOL_VERSION,
             "request": request,
             "buffer": buffer,
+            "last_command": last_command,
         },
         ensure_ascii=False,
     )

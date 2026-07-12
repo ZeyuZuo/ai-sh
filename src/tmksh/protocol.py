@@ -17,6 +17,7 @@ MAX_REQUEST_CHARS = 4096
 MAX_BUFFER_CHARS = 32 * 1024
 MAX_STDIN_CONTEXT_CHARS = 64 * 1024
 MAX_FAILED_COMMAND_CHARS = 32 * 1024
+MAX_LAST_COMMAND_CHARS = 32 * 1024
 MAX_FAILED_CWD_CHARS = 4096
 MAX_SHELL_NAME_CHARS = 64
 
@@ -47,6 +48,7 @@ class ProtocolRequest:
     request: str
     buffer: str = ""
     failed_command: FailedCommandContext | None = None
+    last_command: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,7 @@ class ProtocolResponse:
 
         return cls(
             kind=result.kind,
-            command=result.command,
+            command=result.command if result.kind == "command" else "",
             answer=result.answer,
             explanation=result.explanation,
             risk_level=result.risk_level,
@@ -119,6 +121,7 @@ def read_protocol_request(stream: BinaryIO) -> ProtocolRequest:
         data.get("request"),
         data.get("buffer", ""),
         data.get("failed_command"),
+        data.get("last_command", ""),
     )
 
 
@@ -129,16 +132,16 @@ def read_nul_protocol_request(stream: BinaryIO) -> ProtocolRequest:
     if len(payload) > MAX_PROTOCOL_INPUT_BYTES:
         raise ProtocolInputError(f"请求数据超过 {MAX_PROTOCOL_INPUT_BYTES} 字节限制。")
     parts = payload.split(b"\0")
-    if len(parts) not in {2, 6}:
-        raise ProtocolInputError("NUL 请求必须包含 2 个或 6 个字段。")
+    if len(parts) not in {2, 6, 7}:
+        raise ProtocolInputError("NUL 请求必须包含 2 个、6 个或 7 个字段。")
     try:
         decoded = [part.decode("utf-8") for part in parts]
     except UnicodeDecodeError as exc:
         raise ProtocolInputError("协议请求必须使用 UTF-8 编码。") from exc
     request, buffer = decoded[:2]
     failed_command: object = None
-    if len(decoded) == 6:
-        command, exit_code, cwd, shell = decoded[2:]
+    if len(decoded) >= 6:
+        command, exit_code, cwd, shell = decoded[2:6]
         if any((command, exit_code, cwd, shell)):
             failed_command = {
                 "command": command,
@@ -146,13 +149,15 @@ def read_nul_protocol_request(stream: BinaryIO) -> ProtocolRequest:
                 "cwd": cwd,
                 "shell": shell,
             }
-    return validate_protocol_fields(request, buffer, failed_command)
+    last_command = decoded[6] if len(decoded) == 7 else ""
+    return validate_protocol_fields(request, buffer, failed_command, last_command)
 
 
 def validate_protocol_fields(
     request: object,
     buffer: object,
     failed_command: object = None,
+    last_command: object = "",
 ) -> ProtocolRequest:
     """Validate fields shared by machine entry points."""
 
@@ -170,7 +175,18 @@ def validate_protocol_fields(
         request=request,
         buffer=buffer,
         failed_command=_validate_failed_command(failed_command),
+        last_command=_validate_last_command(last_command),
     )
+
+
+def _validate_last_command(value: object) -> str:
+    if not isinstance(value, str):
+        raise ProtocolInputError("last_command 必须是字符串。")
+    if len(value) > MAX_LAST_COMMAND_CHARS:
+        raise ProtocolInputError(
+            f"last_command 超过 {MAX_LAST_COMMAND_CHARS} 字符限制。"
+        )
+    return value
 
 
 def _validate_failed_command(value: object) -> FailedCommandContext | None:

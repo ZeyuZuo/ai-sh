@@ -33,7 +33,10 @@ packages = ["src/tmksh"]
 python_version = "3.10"
 strict = true
 files = [
+    "src/tmksh/cli.py",
     "src/tmksh/config.py",
+    "src/tmksh/interaction.py",
+    "src/tmksh/llm.py",
     "src/tmksh/protocol.py",
     "src/tmksh/suggestion.py",
     "src/tmksh/shell",

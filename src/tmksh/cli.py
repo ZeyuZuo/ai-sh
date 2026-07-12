@@ -19,7 +19,13 @@ from tmksh.config import (
 )
 from tmksh.exceptions import TmkshError, ApiError, ConfigError
 from tmksh.history import HistoryStore, new_history_entry
-from tmksh.interaction import FailedCommandContext, parse_user_directive
+from tmksh.interaction import (
+    HELP_TEXT,
+    FailedCommandContext,
+    parse_user_directive,
+    unknown_directive_message,
+)
+from tmksh.llm import AssistantResult
 from tmksh.protocol import (
     ProtocolExitCode,
     ProtocolInputError,
@@ -33,7 +39,12 @@ from tmksh.protocol import (
 )
 from tmksh.shell import render_bash_init, render_fish_init, render_zsh_init
 from tmksh.shell.prompt import prompt_from_tty
-from tmksh.suggestion import create_fix_suggestion, create_suggestion
+from tmksh.suggestion import (
+    Suggestion,
+    create_command_analysis,
+    create_fix_suggestion,
+    create_suggestion,
+)
 from tmksh.ui import console, render_error, render_result
 
 
@@ -47,6 +58,14 @@ class NaturalLanguageGroup(click.Group):
         if args and args[0] not in self.commands and args[0] not in group_options:
             args.insert(0, self.default_command)
         return super().parse_args(ctx, args)
+
+
+class _InteractionRequestError(ValueError):
+    """A local interaction error with a stable machine exit code."""
+
+    def __init__(self, message: str, exit_code: ProtocolExitCode) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 @click.group(
@@ -167,6 +186,7 @@ def suggest_machine(input_format: str) -> None:
         protocol_request.request,
         current_command=protocol_request.buffer,
         failed_command=protocol_request.failed_command,
+        last_command=protocol_request.last_command,
     )
     _emit_protocol_response(response, exit_code)
 
@@ -233,38 +253,23 @@ def _machine_suggestion_response(
     current_command: str = "",
     stdin_context: str = "",
     failed_command: FailedCommandContext | None = None,
+    last_command: str = "",
 ) -> tuple[ProtocolResponse, ProtocolExitCode]:
     config: Config | None = None
     try:
-        validate_protocol_fields(request, current_command, failed_command)
-        directive = parse_user_directive(request)
-        if directive.kind == "fix" and failed_command is None:
-            return (
-                ProtocolResponse.error_response(
-                    "没有找到最近失败的命令。请先运行命令，或直接描述需要修复的问题。"
-                ),
-                ProtocolExitCode.MISSING_CONTEXT,
-            )
-        config = load_config()
-        validate_api_config(config)
-        if directive.kind == "fix":
-            assert failed_command is not None
-            suggestion = create_fix_suggestion(
-                config,
-                failed_command,
-                supplemental=directive.argument,
-            )
-        else:
-            suggestion = create_suggestion(
-                config,
-                directive.argument,
-                stdin_context=stdin_context,
-                current_command=current_command,
-            )
+        suggestion, config = _dispatch_interaction(
+            request,
+            current_command=current_command,
+            stdin_context=stdin_context,
+            failed_command=failed_command,
+            last_command=last_command,
+        )
         return (
             ProtocolResponse.from_result(suggestion.result),
             exit_code_for_result(suggestion.result),
         )
+    except _InteractionRequestError as exc:
+        return ProtocolResponse.error_response(str(exc)), exc.exit_code
     except ProtocolInputError as exc:
         return (
             ProtocolResponse.error_response(str(exc)),
@@ -306,26 +311,120 @@ def _run_suggestion_once(
     history: HistoryStore | None = None,
 ) -> None:
     try:
-        config = config or load_config()
-        validate_api_config(config)
-        history = history or HistoryStore(limit=config.behavior.history_limit)
-        suggestion = create_suggestion(
-            config,
+        suggestion, config = _dispatch_interaction(
             user_input,
             stdin_context=stdin_context,
+            config=config,
         )
         result = suggestion.result
         render_result(result, cwd=str(suggestion.environment.get("cwd", "")))
         if result.kind == "error":
             raise SystemExit(1)
         if result.kind == "command":
+            assert config is not None
+            history = history or HistoryStore(limit=config.behavior.history_limit)
             history.append(new_history_entry(user_input, result.command))
+    except (_InteractionRequestError, ProtocolInputError) as exc:
+        render_error(str(exc))
+        raise SystemExit(1) from exc
     except TmkshError as exc:
         render_error(_redact_error(str(exc), config))
         raise SystemExit(1) from exc
     except KeyboardInterrupt:
         console.print("\n已取消。")
         raise SystemExit(130) from None
+
+
+def _dispatch_interaction(
+    request: str,
+    *,
+    current_command: str = "",
+    stdin_context: str = "",
+    failed_command: FailedCommandContext | None = None,
+    last_command: str = "",
+    config: Config | None = None,
+) -> tuple[Suggestion, Config | None]:
+    """Validate and route one natural-language or directive interaction."""
+
+    protocol_request = validate_protocol_fields(
+        request,
+        current_command,
+        failed_command,
+        last_command,
+    )
+    directive = parse_user_directive(protocol_request.request)
+
+    if directive.kind == "help":
+        result = AssistantResult(kind="answer", answer=HELP_TEXT, risk_level="safe")
+        return Suggestion(result, {}), config
+    if directive.kind == "unknown":
+        raise _InteractionRequestError(
+            unknown_directive_message(directive.name),
+            ProtocolExitCode.INVALID_REQUEST,
+        )
+    if directive.kind in {"new", "ask"} and not directive.argument:
+        usage = "/new <任务>" if directive.kind == "new" else "/ask <问题>"
+        raise _InteractionRequestError(
+            f"缺少必要参数。用法：{usage}",
+            ProtocolExitCode.INVALID_REQUEST,
+        )
+    if directive.kind == "fix" and protocol_request.failed_command is None:
+        raise _InteractionRequestError(
+            "没有找到最近失败的命令。请先运行命令，或直接描述需要修复的问题。",
+            ProtocolExitCode.MISSING_CONTEXT,
+        )
+
+    target_command = (
+        protocol_request.buffer
+        if protocol_request.buffer.strip()
+        else protocol_request.last_command
+    )
+    if directive.kind in {"explain", "check"} and not target_command.strip():
+        raise _InteractionRequestError(
+            "没有找到可分析的命令。请先输入或运行一条命令。",
+            ProtocolExitCode.MISSING_CONTEXT,
+        )
+
+    config = config or load_config()
+    validate_api_config(config)
+
+    try:
+        if directive.kind == "fix":
+            assert protocol_request.failed_command is not None
+            suggestion = create_fix_suggestion(
+                config,
+                protocol_request.failed_command,
+                supplemental=directive.argument,
+            )
+        elif directive.kind in {"explain", "check"}:
+            suggestion = create_command_analysis(
+                config,
+                directive.kind,
+                target_command,
+                focus=directive.argument,
+            )
+        elif directive.kind == "ask":
+            answer = create_answer(
+                config,
+                directive.argument,
+                stdin_context=stdin_context,
+            )
+            result = AssistantResult(kind="answer", answer=answer, risk_level="safe")
+            suggestion = Suggestion(result, {})
+        else:
+            suggestion = create_suggestion(
+                config,
+                directive.argument,
+                stdin_context=stdin_context,
+                current_command=(
+                    "" if directive.kind == "new" else protocol_request.buffer
+                ),
+            )
+    except ApiError as exc:
+        # The caller only receives ``config`` after a successful return. Redact
+        # provider errors here while the exact configured secret is available.
+        raise ApiError(_redact_error(str(exc), config)) from None
+    return suggestion, config
 
 
 def _run_ask_once(question: str, *, config: Config | None = None) -> None:

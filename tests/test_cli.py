@@ -67,7 +67,7 @@ def test_tmksh_suggestion_failure_is_redacted_and_nonzero(
     monkeypatch.setattr(
         "tmksh.cli.create_suggestion",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            ApiError(f"provider error api_key={secret}")
+            ApiError(f"provider echoed {secret}")
         ),
     )
 
@@ -75,7 +75,7 @@ def test_tmksh_suggestion_failure_is_redacted_and_nonzero(
 
     assert invocation.exit_code == 1
     assert secret not in invocation.output
-    assert "api_key=[redacted]" in invocation.output
+    assert "provider echoed [redacted]" in invocation.output
 
 
 def test_tmksh_config_failure_is_nonzero(monkeypatch) -> None:
@@ -117,6 +117,36 @@ def test_tmksh_model_error_result_is_nonzero(monkeypatch, tmp_path) -> None:
 
     assert invocation.exit_code == 1
     assert "模型无法完成请求" in invocation.output
+
+
+def test_human_readable_help_directive_is_local(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: pytest.fail("/help must not load config"),
+    )
+    monkeypatch.setattr(
+        "tmksh.cli.HistoryStore",
+        lambda *args, **kwargs: pytest.fail("/help must not access history"),
+    )
+
+    invocation = CliRunner().invoke(tmksh, ["/help"])
+
+    assert invocation.exit_code == 0
+    assert "回答" in invocation.output
+    assert "/fix [补充信息]" in invocation.output
+
+
+def test_human_readable_unknown_directive_is_local_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: pytest.fail("unknown directives must not load config"),
+    )
+
+    invocation = CliRunner().invoke(tmksh, ["/expalin"])
+
+    assert invocation.exit_code == 1
+    assert "未知指令：/expalin" in invocation.output
+    assert "/explain" in invocation.output
 
 
 def test_tmksh_ask_returns_plain_text_for_piped_diff(monkeypatch, tmp_path) -> None:

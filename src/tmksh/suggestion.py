@@ -9,9 +9,13 @@ from tmksh.context import collect_context
 from tmksh.interaction import FailedCommandContext
 from tmksh.llm import (
     AssistantResult,
+    CommandAnalysisKind,
+    build_command_analysis_messages,
     build_fix_messages,
     build_messages,
+    generate_answer,
     generate_command,
+    parse_check_answer,
 )
 from tmksh.safety import check_command
 
@@ -63,6 +67,30 @@ def create_fix_suggestion(
         language=config.behavior.language,
     )
     result = normalize_result(generate_command(config, messages))
+    return Suggestion(result=result, environment=environment)
+
+
+def create_command_analysis(
+    config: Config,
+    operation: CommandAnalysisKind,
+    command: str,
+    *,
+    focus: str = "",
+) -> Suggestion:
+    """Explain or check a command without creating an insertable result."""
+
+    environment = collect_context()
+    messages = build_command_analysis_messages(
+        operation,
+        command,
+        environment,
+        focus=focus,
+        language=config.behavior.language,
+    )
+    answer = generate_answer(config, messages)
+    if operation == "check":
+        answer = parse_check_answer(answer, language=config.behavior.language)
+    result = AssistantResult(kind="answer", answer=answer, risk_level="safe")
     return Suggestion(result=result, environment=environment)
 
 
