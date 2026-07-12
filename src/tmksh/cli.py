@@ -130,7 +130,7 @@ def configure(
             language=current.behavior.language,
         )
     except TmkshError as exc:
-        render_error(str(exc))
+        render_error(_redact_error(str(exc), current))
         raise SystemExit(1) from exc
 
     console.print(f"配置已保存：{path}")
@@ -252,13 +252,13 @@ def _machine_suggestion_response(
             ProtocolExitCode.INVALID_REQUEST,
         )
     except ConfigError as exc:
-        message = _redact_protocol_error(str(exc), config)
+        message = _redact_error(str(exc), config)
         return ProtocolResponse.error_response(message), ProtocolExitCode.CONFIG_ERROR
     except ApiError as exc:
-        message = _redact_protocol_error(str(exc), config)
+        message = _redact_error(str(exc), config)
         return ProtocolResponse.error_response(message), ProtocolExitCode.API_ERROR
     except TmkshError as exc:
-        message = _redact_protocol_error(str(exc), config)
+        message = _redact_error(str(exc), config)
         return ProtocolResponse.error_response(message), ProtocolExitCode.INTERNAL_ERROR
     except KeyboardInterrupt:
         return (
@@ -297,14 +297,16 @@ def _run_suggestion_once(
         )
         result = suggestion.result
         render_result(result, cwd=str(suggestion.environment.get("cwd", "")))
+        if result.kind == "error":
+            raise SystemExit(1)
         if result.kind == "command":
-            history.append(
-                new_history_entry(user_input, result.command)
-            )
+            history.append(new_history_entry(user_input, result.command))
     except TmkshError as exc:
-        render_error(str(exc))
+        render_error(_redact_error(str(exc), config))
+        raise SystemExit(1) from exc
     except KeyboardInterrupt:
         console.print("\n已取消。")
+        raise SystemExit(130) from None
 
 
 def _run_ask_once(question: str, *, config: Config | None = None) -> None:
@@ -332,7 +334,7 @@ def _run_ask_once(question: str, *, config: Config | None = None) -> None:
         )
         click.echo(answer)
     except TmkshError as exc:
-        message = _redact_protocol_error(str(exc), config)
+        message = _redact_error(str(exc), config)
         click.echo(f"错误：{message}", err=True)
         raise SystemExit(1) from exc
     except KeyboardInterrupt:
@@ -358,7 +360,7 @@ def _show_config() -> None:
     try:
         config = load_config()
     except TmkshError as exc:
-        render_error(str(exc))
+        render_error(_redact_error(str(exc), None))
         raise SystemExit(1) from exc
 
     api_key_status = "configured" if config.api.api_key else "missing"
@@ -368,6 +370,6 @@ def _show_config() -> None:
     console.print(f"api_key: {api_key_status}")
 
 
-def _redact_protocol_error(message: str, config: Config | None) -> str:
+def _redact_error(message: str, config: Config | None) -> str:
     secrets = (config.api.api_key,) if config else ()
     return redact_sensitive(message, secrets=secrets)

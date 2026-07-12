@@ -319,7 +319,17 @@ def _truncate(value: str, limit: int) -> str:
 
 def _safe_api_message(exc: APIError) -> str:
     message = str(exc)
-    return re.sub(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[redacted]", message)
+    redacted = re.sub(
+        r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+",
+        r"\1[redacted]",
+        message,
+    )
+    return re.sub(
+        r"""(?i)((?:api[_-]?key|credential|access[_-]?token|secret)["'\s:=]+)"""
+        r"""[^\s,"'}]+""",
+        r"\1[redacted]",
+        redacted,
+    )
 
 
 def _looks_like_json_mode_rejection(exc: APIError) -> bool:

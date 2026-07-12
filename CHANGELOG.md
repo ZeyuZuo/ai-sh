@@ -2,6 +2,18 @@
 
 本项目的主要变化记录在此文件中。
 
+## 0.2.1 - 2026-07-12
+
+### Fixed
+
+- 修复复合命令控制符、根目录 glob 和 Shell `-c` 包装绕过危险 `rm` 本地拦截的问题。
+- 普通命令建议模式现在会脱敏 API 错误中的 credential，并在失败时返回非零退出码。
+- 普通命令建议模式在 Ctrl+C 时返回退出码 130。
+
+### Security
+
+- 扩展 API key、Bearer token、credential 和 access token 的错误信息脱敏。
+
 ## 0.2.0 - 2026-07-12
 
 ### Added

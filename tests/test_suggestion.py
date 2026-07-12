@@ -48,6 +48,20 @@ def test_normalize_result_blocks_local_hard_pattern_even_if_ai_marks_safe() -> N
     assert normalized.risk_reason == "删除根目录"
 
 
+def test_normalize_result_blocks_compound_root_deletion_marked_safe() -> None:
+    normalized = normalize_result(
+        AssistantResult(
+            command="sudo rm -rf /&&echo done",
+            explanation="dangerously wrong compound command",
+            risk_level="safe",
+        )
+    )
+
+    assert normalized.kind == "blocked"
+    assert normalized.command == ""
+    assert normalized.risk_reason == "删除根目录"
+
+
 def test_normalize_result_preserves_non_command_results() -> None:
     result = AssistantResult(kind="clarification", clarification="请提供目录。")
 

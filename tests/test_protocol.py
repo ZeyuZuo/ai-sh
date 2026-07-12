@@ -17,6 +17,7 @@ from tmksh.protocol import (
     ProtocolInputError,
     read_nul_protocol_request,
     read_protocol_request,
+    redact_sensitive,
 )
 from tmksh.suggestion import Suggestion
 
@@ -197,6 +198,21 @@ def test_suggest_protocol_redacts_api_key_from_api_errors(
     response = json.loads(invocation.stdout)
     assert response["kind"] == "error"
     assert "[redacted]" in response["error"]
+
+
+def test_redact_sensitive_handles_common_credential_labels() -> None:
+    message = (
+        "credential=credential-secret "
+        "access_token:access-secret "
+        "secret='generic-secret'"
+    )
+
+    redacted = redact_sensitive(message)
+
+    assert "credential-secret" not in redacted
+    assert "access-secret" not in redacted
+    assert "generic-secret" not in redacted
+    assert redacted.count("[redacted]") == 3
 
 
 def test_suggest_protocol_hides_unexpected_exception_details(

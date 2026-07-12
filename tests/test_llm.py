@@ -3,7 +3,13 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    BadRequestError,
+    RateLimitError,
+)
 
 from tmksh.config import ApiConfig, Config
 from tmksh.exceptions import ApiError
@@ -14,6 +20,7 @@ from tmksh.llm import (
     generate_command,
     parse_answer,
     parse_command_result,
+    _safe_api_message,
 )
 
 
@@ -173,6 +180,22 @@ def test_generate_answer_maps_network_failure(monkeypatch) -> None:
 
     with pytest.raises(ApiError, match="连接 AI 服务超时或失败"):
         generate_answer(_config(), _messages())
+
+
+def test_safe_api_message_redacts_common_credentials() -> None:
+    request = httpx.Request("POST", "https://api.example.test/v1/chat")
+    error = APIError(
+        "Bearer bearer-secret api_key=key-secret credential:credential-secret",
+        request=request,
+        body=None,
+    )
+
+    message = _safe_api_message(error)
+
+    assert "bearer-secret" not in message
+    assert "key-secret" not in message
+    assert "credential-secret" not in message
+    assert message.count("[redacted]") == 3
 
 
 def _config() -> Config:

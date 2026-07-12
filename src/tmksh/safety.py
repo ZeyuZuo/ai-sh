@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass
@@ -77,26 +78,108 @@ def _normalize(command: str) -> str:
 
 
 def _dangerous_rm_reason(command: str) -> str:
-    tokens = split_command_for_display(command)
-    control_tokens = {";", "&&", "||", "|"}
+    return _dangerous_rm_reason_at_depth(command, depth=0)
+
+
+def _dangerous_rm_reason_at_depth(command: str, *, depth: int) -> str:
+    tokens = _split_shell_tokens(command)
+    control_tokens = {";", "&&", "||", "|", "&", "(", ")"}
     for index, token in enumerate(tokens):
+        if depth < 2 and _shell_name(token) in {"sh", "bash", "zsh", "fish"}:
+            payload = _shell_command_payload(tokens, index, control_tokens)
+            if payload:
+                reason = _dangerous_rm_reason_at_depth(payload, depth=depth + 1)
+                if reason:
+                    return reason
         if token != "rm":
             continue
         recursive = False
         forced = False
+        targets: list[str] = []
+        parse_options = True
         for next_token in tokens[index + 1 :]:
-            if next_token in control_tokens:
+            if next_token in control_tokens or _is_redirection_token(next_token):
                 break
             if next_token == "-":
+                targets.append(next_token)
                 continue
             if next_token == "--":
+                parse_options = False
                 continue
-            if next_token.startswith("-") and next_token != "-":
-                option = next_token.lstrip("-")
+            if parse_options and next_token.startswith("--"):
+                recursive = recursive or next_token == "--recursive"
+                forced = forced or next_token == "--force"
+                continue
+            if parse_options and next_token.startswith("-"):
+                option = next_token[1:]
                 recursive = recursive or "r" in option or "R" in option
                 forced = forced or "f" in option
                 continue
-            target = "/" if next_token == "/" else next_token.rstrip("/")
-            if recursive and forced and target in {"/", "~"}:
-                return "删除根目录" if target == "/" else "删除用户主目录"
+            targets.append(next_token)
+        if recursive and forced:
+            for target in targets:
+                reason = _dangerous_rm_target_reason(target)
+                if reason:
+                    return reason
+    return ""
+
+
+def _split_shell_tokens(command: str) -> list[str]:
+    try:
+        lexer = shlex.shlex(
+            command.replace("\n", "\n;\n"),
+            posix=True,
+            punctuation_chars=";&|()<>",
+        )
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        return list(lexer)
+    except ValueError:
+        return command.split()
+
+
+def _shell_name(token: str) -> str:
+    return token.rsplit("/", 1)[-1]
+
+
+def _shell_command_payload(
+    tokens: list[str], index: int, control_tokens: set[str]
+) -> str:
+    for option_index in range(index + 1, len(tokens)):
+        option = tokens[option_index]
+        if option in control_tokens:
+            return ""
+        if option == "--command" or (
+            option.startswith("-") and not option.startswith("--") and "c" in option[1:]
+        ):
+            payload_index = option_index + 1
+            if (
+                payload_index < len(tokens)
+                and tokens[payload_index] not in control_tokens
+            ):
+                return tokens[payload_index]
+            return ""
+        if not option.startswith("-"):
+            return ""
+    return ""
+
+
+def _is_redirection_token(token: str) -> bool:
+    return bool(token) and all(character in "<>" for character in token)
+
+
+def _dangerous_rm_target_reason(target: str) -> str:
+    trimmed = target.rstrip("/")
+    if trimmed in {"~", "$HOME", "${HOME}"} or target in {
+        "~/*",
+        "$HOME/*",
+        "${HOME}/*",
+    }:
+        return "删除用户主目录"
+
+    normalized = posixpath.normpath("/" + target.lstrip("/"))
+    if target.startswith("/") and normalized == "/":
+        return "删除根目录"
+    if target in {"/*", "/.??*", "/.[!.]*", "/{*,.*}"}:
+        return "删除根目录"
     return ""

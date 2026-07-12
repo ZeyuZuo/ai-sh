@@ -54,6 +54,71 @@ def test_tmksh_renders_block_without_executing(monkeypatch, tmp_path) -> None:
     assert "已拦截危险命令" in invocation.output
 
 
+def test_tmksh_suggestion_failure_is_redacted_and_nonzero(
+    monkeypatch, tmp_path
+) -> None:
+    from tmksh.exceptions import ApiError
+
+    secret = "super-secret-api-key"
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: _config(tmp_path, api_key=secret),
+    )
+    monkeypatch.setattr(
+        "tmksh.cli.create_suggestion",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ApiError(f"provider error api_key={secret}")
+        ),
+    )
+
+    invocation = CliRunner().invoke(tmksh, ["生成命令"])
+
+    assert invocation.exit_code == 1
+    assert secret not in invocation.output
+    assert "api_key=[redacted]" in invocation.output
+
+
+def test_tmksh_config_failure_is_nonzero(monkeypatch) -> None:
+    from tmksh.exceptions import ConfigError
+
+    monkeypatch.setattr(
+        "tmksh.cli.load_config",
+        lambda: (_ for _ in ()).throw(ConfigError("缺少配置。")),
+    )
+
+    invocation = CliRunner().invoke(tmksh, ["生成命令"])
+
+    assert invocation.exit_code == 1
+    assert "缺少配置" in invocation.output
+
+
+def test_tmksh_suggestion_interrupt_returns_130(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(
+        "tmksh.cli.create_suggestion",
+        lambda *args, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    invocation = CliRunner().invoke(tmksh, ["生成命令"])
+
+    assert invocation.exit_code == 130
+    assert "已取消" in invocation.output
+
+
+def test_tmksh_model_error_result_is_nonzero(monkeypatch, tmp_path) -> None:
+    result = AssistantResult(kind="error", error="模型无法完成请求。")
+    monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(
+        "tmksh.cli.create_suggestion",
+        lambda *args, **kwargs: _suggestion(tmp_path, result),
+    )
+
+    invocation = CliRunner().invoke(tmksh, ["生成命令"])
+
+    assert invocation.exit_code == 1
+    assert "模型无法完成请求" in invocation.output
+
+
 def test_tmksh_ask_returns_plain_text_for_piped_diff(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("tmksh.cli.load_config", lambda: _config(tmp_path))
     captured = {}
@@ -164,7 +229,7 @@ def test_tmksh_reports_package_version() -> None:
     invocation = CliRunner().invoke(tmksh, ["--version"])
 
     assert invocation.exit_code == 0
-    assert invocation.output == "tmksh, version 0.2.0\n"
+    assert invocation.output == "tmksh, version 0.2.1\n"
 
 
 def test_piped_stdin_is_read_with_a_limit(monkeypatch) -> None:
@@ -220,11 +285,11 @@ def _suggestion(tmp_path, result: AssistantResult) -> Suggestion:
     return Suggestion(result=result, environment={"cwd": str(tmp_path)})
 
 
-def _config(tmp_path):
+def _config(tmp_path, *, api_key="test-key"):
     from tmksh.config import ApiConfig, BehaviorConfig, Config
 
     return Config(
-        api=ApiConfig(api_key="test-key"),
+        api=ApiConfig(api_key=api_key),
         behavior=BehaviorConfig(history_limit=10),
         path=tmp_path / "config.toml",
     )

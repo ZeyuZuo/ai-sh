@@ -175,7 +175,8 @@ def redact_sensitive(message: str, *, secrets: tuple[str, ...] = ()) -> str:
         redacted,
     )
     redacted = re.sub(
-        r'(?i)(api[_-]?key["\s:=]+)[^\s,"}]+',
+        r"""(?i)((?:api[_-]?key|credential|access[_-]?token|secret)["'\s:=]+)"""
+        r"""[^\s,"'}]+""",
         r"\1[redacted]",
         redacted,
     )

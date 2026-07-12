@@ -285,6 +285,6 @@ src/tmksh/
 
 ## Status
 
-当前版本是 `0.2.0`。默认路径已经取消所有执行能力，并提供 `protocol_version=1` 机器接口、Bash/Zsh/Fish Shell Widget，以及独立的 `tmksh ask` 问答模式。版本变化见 [CHANGELOG](CHANGELOG.md)，从 v0.1 升级见 [迁移说明](docs/MIGRATION_V0.2.md)。
+当前版本是 `0.2.1`。默认路径已经取消所有执行能力，并提供 `protocol_version=1` 机器接口、Bash/Zsh/Fish Shell Widget，以及独立的 `tmksh ask` 问答模式。版本变化见 [CHANGELOG](CHANGELOG.md)，从 v0.1 升级见 [迁移说明](docs/MIGRATION_V0.2.md)。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。当前产品路线见 [产品与工程路线](docs/ROADMAP.md)，Shell 原生改造的设计背景见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。
