@@ -38,6 +38,11 @@ if [[ -z ${TMKSH_PYTHON:-} ]]; then
 fi
 
 TMKSH_COMMAND_CWD="${TMKSH_COMMAND_CWD:-$PWD}"
+TMKSH_LAST_FAILED_COMMAND=""
+TMKSH_LAST_FAILED_STATUS=""
+TMKSH_LAST_FAILED_CWD=""
+TMKSH_LAST_FAILED_SHELL=""
+TMKSH_LAST_SEEN_HISTORY_NUMBER=""
 
 __tmksh_capture_failed_command() {
     local exit_status=$?

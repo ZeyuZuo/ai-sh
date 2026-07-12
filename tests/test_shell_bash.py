@@ -19,6 +19,7 @@ def test_bash_init_command_outputs_loadable_script() -> None:
     assert '_prompt --label "$prompt"' in invocation.stdout
     assert "__tmksh_capture_failed_command" in invocation.stdout
     assert "PROMPT_COMMAND" in invocation.stdout
+    assert 'TMKSH_LAST_FAILED_COMMAND=""' in invocation.stdout
 
     syntax = subprocess.run(
         ["bash", "-n"],
