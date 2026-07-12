@@ -7,8 +7,17 @@
 ### Added
 
 - 在统一 `tmksh>` 提示符中增加 `/fix [补充信息]`，修复最近一条非零退出命令。
-- Bash、Zsh 和 Fish 集成会在本地保存最近失败命令、退出码、执行目录和 Shell 类型。
-- `protocol_version=1` 增加可选 `failed_command` 上下文，并保持旧 JSON 和双字段 NUL 客户端兼容。
+- 完成 `/explain`、`/check`、`/new`、`/ask` 和 `/help`，与普通自然语言及 `/fix` 共用本地指令解析和分派。
+- `/explain` 和 `/check` 优先分析当前 buffer，为空时回退到 Shell 保存的上一条命令；文本结果不修改 buffer 或 cursor。
+- `/help` 和未知指令在本地返回，未知指令会提示相近的受支持指令，不调用 API。
+- Bash、Zsh 和 Fish 集成会分别保存上一条命令，以及最近失败的命令、退出码、执行目录和 Shell 类型，供文本分析回退和 `/fix` 使用。
+- `protocol_version` 保持为 1；JSON 请求支持可选 `failed_command` 和 `last_command`，NUL 输入兼容旧 2/6 字段帧，并以第 7 字段追加上一条命令。
+
+### Changed
+
+- 三种 Shell Widget 按响应 `kind` 统一处理 command、answer、clarification、blocked 和 error；只有成功的 command 结果可以替换 buffer。
+- `/new` 始终忽略当前 buffer，`/ask` 始终使用纯文本问答路径且不写入建议历史。
+- `/check` 报告由本地校验并规范化为风险、正确性、兼容性和建议四项，支持 `zh`、`en` 与自动语言配置。
 
 ### Fixed
 
@@ -21,6 +30,7 @@
 
 - `/fix` 结果经过与普通建议相同的 AI danger 判断和本地硬拦截。
 - 失败状态钩子不捕获、不持久化也不上传 stdout/stderr；错误、取消和拦截不会修改原 buffer。
+- 非 command 响应会清空协议中的 `command`；文本回答即使遇到异常载荷也不能写入 Shell buffer。
 
 ## 0.2.1 - 2026-07-12
 

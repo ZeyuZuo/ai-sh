@@ -14,7 +14,7 @@
 
 - 自然语言生成 shell 命令
 - Bash、Zsh 和 Fish 原生命令行 Widget，默认快捷键 `Ctrl+G`
-- `/fix [补充信息]` 修复最近一条失败命令
+- 统一的 `/fix`、`/explain`、`/check`、`/new`、`/ask` 和 `/help` 特殊指令
 - 独立的 `tmksh ask` 管道内容分析和普通问答模式
 - 单次建议模式，任何建议都不由 tmksh 执行
 - `tmksh --json` 和 `tmksh suggest` 稳定机器接口
@@ -56,7 +56,7 @@ uv run tmksh init fish | source
 
 脚本只注册快捷键，不会修改 `.bashrc` 或 `.zshrc`。确认可用后，可由用户自行把对应的 `eval` 行加入 Shell 配置；正式安装后通常不需要其中的 `uv run`。
 
-从不支持 `/fix` 的旧版本升级后，需要重新运行对应的 `init` 命令或重新打开已配置的 Shell，让新的失败状态钩子生效。
+升级到支持统一特殊指令的版本后，需要重新运行对应的 `init` 命令或重新打开已配置的 Shell。已经加载的旧 Widget 不会自动获得文本结果分派和上一条命令上下文支持。
 
 首次使用前配置 API：
 
@@ -179,6 +179,19 @@ $ uv add pyyaml
 
 `/fix` 使用当前 Shell 在本地保存的最近一条非零退出命令、退出码、执行时的 cwd 和 Shell 类型。它不会捕获或自动上传 stdout/stderr；具体报错和额外约束可以直接写在 `/fix` 后面。成功结果只替换当前 buffer，仍需用户检查并按 Enter 执行。没有失败记录、请求取消、API 错误或危险结果时，原 buffer 和 cursor 保持不变。
 
+所有交互都使用同一个 `tmksh>` 提示符。支持的特殊指令是：
+
+| 指令 | 行为 | 修改 buffer |
+|---|---|---|
+| `/fix [补充信息]` | 修复最近失败的命令 | 是 |
+| `/explain [关注点]` | 解释当前 buffer；为空时解释上一条命令 | 否 |
+| `/check [检查重点]` | 检查正确性、风险和兼容性，目标选择同 `/explain` | 否 |
+| `/new <任务>` | 忽略当前 buffer，生成一条新命令 | 是 |
+| `/ask <问题>` | 返回自然语言答案 | 否 |
+| `/help` | 显示本地帮助 | 否 |
+
+`/help` 和未知指令完全在本地处理，不调用 API；未知指令会显示相近指令建议。`/explain`、`/check` 和 `/ask` 的文本结果只显示在提示符上方，原 buffer 和 cursor 保持不变。没有 `/` 前缀的自然语言仍遵循默认规则：空 buffer 生成新命令，非空 buffer 修改当前命令。
+
 自定义快捷键：
 
 ```bash
@@ -284,6 +297,7 @@ src/tmksh/
   cli.py        # click 入口：tmksh 单一命令
   config.py     # 配置读取和默认值
   context.py    # 环境上下文收集
+  interaction.py # 特殊指令解析和 Shell 命令状态模型
   llm.py        # 命令 JSON 与问答纯文本的独立提示词、调用和解析
   suggestion.py # 建议生成编排和最终安全归一化
   protocol.py   # Shell Widget 使用的版本化机器协议
@@ -299,10 +313,11 @@ src/tmksh/
 - API key 不打印到终端。
 - 历史记录只保存在本地 `~/.tmksh/history.json`。
 - `tmksh ask` 的问题和 stdin 内容不写入持久化历史。
+- Shell 保存的上一条命令只会在 buffer 为空的 `/explain` 或 `/check` 中作为分析目标发送给配置的 API。
 - 除了调用你配置的 API endpoint，项目不会把命令数据发送到其他远端。
 
 ## Status
 
-当前发布版本是 `0.2.1`。当前源码还实现了 `/fix` 和三种 Shell 的失败命令状态；默认路径没有任何自动执行能力。版本变化见 [CHANGELOG](CHANGELOG.md)，从 v0.1 升级见 [迁移说明](docs/MIGRATION_V0.2.md)。
+当前发布版本是 `0.2.1`。当前源码还实现了统一特殊指令、文本分析结果以及三种 Shell 的最近命令和失败命令状态；默认路径没有任何自动执行能力。版本变化见 [CHANGELOG](CHANGELOG.md)，从 v0.1 升级见 [迁移说明](docs/MIGRATION_V0.2.md)。
 
 v0.2 已确定改为 Shell 原生交互：通过快捷键把 AI 建议写入当前 Shell 的输入缓冲区，由用户编辑并按 Enter 执行；同时取消默认自动执行，并将管道问答与命令生成分离。当前产品路线见 [产品与工程路线](docs/ROADMAP.md)，Shell 原生改造的设计背景见 [Shell 原生交互改造方案](docs/SHELL_NATIVE_PLAN.md)。
