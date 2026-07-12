@@ -23,6 +23,7 @@ def test_zsh_init_command_outputs_zle_script() -> None:
     assert "suggest --input-format nul" in invocation.stdout
     assert "__tmksh_capture_command_start" in invocation.stdout
     assert "__tmksh_capture_command_end" in invocation.stdout
+    assert 'TMKSH_LAST_COMMAND=""' in invocation.stdout
 
 
 def test_zsh_init_supports_custom_binding_and_quoted_path() -> None:
@@ -45,10 +46,12 @@ def test_shell_widgets_share_protocol_and_safety_semantics() -> None:
 
     for script in scripts:
         assert "suggest --input-format nul" in script
-        assert "printf '%s\\0%s\\0%s\\0%s\\0%s\\0%s'" in script
+        assert "printf '%s\\0%s\\0%s\\0%s\\0%s\\0%s\\0%s'" in script
         assert "LAST_FAILED_COMMAND" in script
         assert "LAST_FAILED_STATUS" in script
         assert "LAST_FAILED_CWD" in script
+        assert "LAST_COMMAND" in script
+        assert "kind" in script
         assert any(
             marker in script
             for marker in ("status == 0", "exit_status == 0", "$exit_status -eq 0")
@@ -57,7 +60,7 @@ def test_shell_widgets_share_protocol_and_safety_semantics() -> None:
             marker in script
             for marker in ("status == 30", "exit_status == 30", "$exit_status -eq 30")
         )
-        assert ("attempts < 3" in script) or ("$attempts -lt 3" in script)
+        assert "clarification_count" in script
         assert "risk_reason" in script
         assert "eval " not in script
     assert 'original_point="$READLINE_POINT"' in scripts[0]
@@ -96,6 +99,37 @@ def test_zsh_widget_replaces_buffer_and_handles_clarification(tmp_path) -> None:
     expected = "find . ./src"
     assert _line_from_output(completed.stdout) == expected
     assert _point_from_output(completed.stdout) == len(expected)
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_displays_multiline_answer_without_inserting_command(
+    tmp_path,
+) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="answer\n",
+        original_buffer="keep --this",
+        original_cursor=4,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "第一行\n\n第三行" in completed.stdout
+    assert "tmksh did not return a command" not in completed.stdout
+    assert _line_from_output(completed.stdout) == "keep --this"
+    assert _point_from_output(completed.stdout) == 4
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_sends_all_three_clarification_answers(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="clarify-three\n答案一\n答案二\n答案三\n",
+        original_buffer="keep this",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.count("需要澄清：") == 3
+    assert _line_from_output(completed.stdout) == "clarified with 3 answers"
 
 
 @pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
@@ -150,7 +184,10 @@ __tmksh_capture_command_start 'python missing.py'
 TMKSH_PENDING_CWD='/tmp/original cwd'
 (exit 7)
 __tmksh_capture_command_end
-print -rn -- "$TMKSH_LAST_FAILED_COMMAND\0$TMKSH_LAST_FAILED_STATUS\0$TMKSH_LAST_FAILED_CWD\0$TMKSH_LAST_FAILED_SHELL"
+__tmksh_capture_command_start 'git status --short'
+true
+__tmksh_capture_command_end
+print -rn -- "$TMKSH_LAST_FAILED_COMMAND\0$TMKSH_LAST_FAILED_STATUS\0$TMKSH_LAST_FAILED_CWD\0$TMKSH_LAST_FAILED_SHELL\0$TMKSH_LAST_COMMAND"
 """
     completed = subprocess.run(
         [ZSH, "-f", "-c", shell_code, "zsh", "/dev/stdin"],
@@ -166,6 +203,7 @@ print -rn -- "$TMKSH_LAST_FAILED_COMMAND\0$TMKSH_LAST_FAILED_STATUS\0$TMKSH_LAST
         "7",
         "/tmp/original cwd",
         "zsh",
+        "git status --short",
     ]
 
 
@@ -184,6 +222,19 @@ def test_zsh_widget_sends_failure_state_for_fix(tmp_path) -> None:
     assert _line_from_output(completed.stdout) == (
         "fixed[zsh:1:/tmp/demo project]: python app.py"
     )
+
+
+@pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
+def test_zsh_widget_sends_last_command_context(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="last-command\n",
+        original_buffer="keep this",
+        last_command="git status --short",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert _line_from_output(completed.stdout) == "last[git status --short]"
 
 
 @pytest.mark.skipif(ZSH is None, reason="zsh is not installed")
@@ -233,6 +284,7 @@ def _run_widget(
     failed_command: str = "",
     failed_status: int | None = None,
     failed_cwd: str = "",
+    last_command: str = "",
 ) -> subprocess.CompletedProcess[str]:
     assert ZSH is not None
     backend = _write_fake_backend(tmp_path)
@@ -252,6 +304,7 @@ TMKSH_LAST_FAILED_COMMAND="$4"
 TMKSH_LAST_FAILED_STATUS="$5"
 TMKSH_LAST_FAILED_CWD="$6"
 TMKSH_LAST_FAILED_SHELL="${4:+zsh}"
+TMKSH_LAST_COMMAND="$7"
 __tmksh_widget
 print -r -- "__TMKSH_LINE__=$BUFFER"
 print -r -- "__TMKSH_POINT__=$CURSOR"
@@ -269,6 +322,7 @@ print -r -- "__TMKSH_POINT__=$CURSOR"
             failed_command,
             "" if failed_status is None else str(failed_status),
             failed_cwd,
+            last_command,
         ],
         input=user_input,
         text=True,
@@ -284,7 +338,7 @@ import json
 import sys
 
 parts = sys.stdin.buffer.read().split(b"\\0")
-request, buffer, failed_command, failed_status, failed_cwd, failed_shell = (
+request, buffer, failed_command, failed_status, failed_cwd, failed_shell, last_command = (
     part.decode() for part in parts
 )
 response = {{
@@ -312,6 +366,10 @@ elif request.lower().startswith("/fix"):
     response.update(
         command=f"fixed[{{failed_shell}}:{{failed_status}}:{{failed_cwd}}]: {{failed_command}}"
     )
+elif request == "answer":
+    response.update(kind="answer", command="rm -rf /", answer="第一行\\n\\n第三行")
+elif request == "last-command":
+    response.update(command=f"last[{{last_command}}]")
 elif "block" in request:
     response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
     status = 31
@@ -320,6 +378,17 @@ elif "caution" in request:
 elif "error" in request:
     response.update(kind="error", command="", error="连接 AI 服务失败")
     status = 21
+elif request.startswith("clarify-three"):
+    answer_count = request.count("用户补充：")
+    if answer_count < 3:
+        response.update(
+            kind="clarification",
+            command="",
+            clarification=f"请提供第 {{answer_count + 1}} 个答案。",
+        )
+        status = 30
+    else:
+        response.update(command="clarified with 3 answers")
 elif "clarify" in request and "用户补充" not in request:
     response.update(kind="clarification", command="", clarification="请提供目录。")
     status = 30

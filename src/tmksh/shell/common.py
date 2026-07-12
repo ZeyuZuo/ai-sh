@@ -28,9 +28,22 @@ if field == "message":
         risk = data.get("risk_level", "")
         detail = data.get("risk_reason") if risk == "caution" else data.get("explanation")
         value = f"{risk} · {detail}" if detail else risk
+    elif kind == "answer":
+        value = data.get("answer") or "tmksh did not return a usable result."
+    elif kind == "clarification":
+        value = data.get("clarification") or "tmksh did not return a usable result."
+    elif kind == "blocked":
+        value = (
+            data.get("risk_reason")
+            or data.get("explanation")
+            or "tmksh did not return a usable result."
+        )
+    elif kind == "error":
+        value = data.get("error") or "tmksh did not return a usable result."
     else:
         value = (
             data.get("error")
+            or data.get("answer")
             or data.get("clarification")
             or data.get("risk_reason")
             or data.get("explanation")

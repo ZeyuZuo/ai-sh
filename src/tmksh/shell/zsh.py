@@ -37,8 +37,10 @@ if [[ -z ${TMKSH_PYTHON:-} ]]; then
 fi
 
 autoload -Uz add-zsh-hook
+typeset -g TMKSH_LAST_COMMAND=""
 
 __tmksh_capture_command_start() {
+    typeset -g TMKSH_LAST_COMMAND="$1"
     typeset -g TMKSH_PENDING_COMMAND="$1"
     typeset -g TMKSH_PENDING_CWD="$PWD"
 }
@@ -66,8 +68,11 @@ __tmksh_json_field() {
     "$TMKSH_PYTHON" -c '@@TMKSH_JSON_FIELD@@' "$1"
 }
 
-__tmksh_zle_message() {
-    zle -M "$1" 2>/dev/null || print -r -- "$1"
+__tmksh_print_message() {
+    if (( $+ZLE_STATE )); then
+        zle -I
+    fi
+    print -r -- "$1"
 }
 
 __tmksh_read_input() {
@@ -99,17 +104,19 @@ __tmksh_widget() {
     local -i original_cursor=$CURSOR
     local request=""
     local response=""
+    local kind=""
     local command=""
     local message=""
     local question=""
-    local answer=""
+    local clarification_answer=""
     local REPLY=""
     local -i exit_status=0
-    local -i attempts=0
+    local -i clarification_count=0
     local failed_command="${TMKSH_LAST_FAILED_COMMAND:-}"
     local failed_status="${TMKSH_LAST_FAILED_STATUS:-}"
     local failed_cwd="${TMKSH_LAST_FAILED_CWD:-}"
     local failed_shell="${TMKSH_LAST_FAILED_SHELL:-}"
+    local last_command="${TMKSH_LAST_COMMAND:-}"
 
     if ! __tmksh_read_input 'tmksh> '; then
         BUFFER="$original_buffer"
@@ -123,59 +130,70 @@ __tmksh_widget() {
         return 0
     fi
 
-    while (( attempts < 3 )); do
+    while true; do
         response="$(
-            printf '%s\0%s\0%s\0%s\0%s\0%s' \
+            printf '%s\0%s\0%s\0%s\0%s\0%s\0%s' \
                 "$request" "$original_buffer" "$failed_command" \
-                "$failed_status" "$failed_cwd" "$failed_shell" \
+                "$failed_status" "$failed_cwd" "$failed_shell" "$last_command" \
                 | "$TMKSH_COMMAND" suggest --input-format nul
         )"
         exit_status=$?
+        kind="$(printf '%s' "$response" | __tmksh_json_field kind)"
 
-        if (( exit_status == 0 )); then
+        if (( exit_status == 0 )) && [[ "$kind" == "command" ]]; then
             command="$(printf '%s' "$response" | __tmksh_json_field command)"
             message="$(printf '%s' "$response" | __tmksh_json_field message)"
             if [[ -z "$command" ]]; then
-                __tmksh_zle_message "${message:-tmksh did not return a command.}"
+                __tmksh_print_message "${message:-tmksh did not return a command.}"
                 BUFFER="$original_buffer"
                 CURSOR=$original_cursor
                 return 0
             fi
+            [[ -n "$message" ]] && __tmksh_print_message "$message"
             BUFFER="$command"
             CURSOR=${#BUFFER}
-            [[ -n "$message" ]] && __tmksh_zle_message "$message"
             return 0
         fi
 
-        if (( exit_status == 30 )); then
+        if (( exit_status == 0 )) && [[ "$kind" == "answer" ]]; then
+            message="$(printf '%s' "$response" | __tmksh_json_field message)"
+            __tmksh_print_message "${message:-tmksh did not return a usable result.}"
+            BUFFER="$original_buffer"
+            CURSOR=$original_cursor
+            return 0
+        fi
+
+        if (( exit_status == 30 )) && [[ "$kind" == "clarification" ]]; then
             question="$(printf '%s' "$response" | __tmksh_json_field clarification)"
-            __tmksh_zle_message "需要澄清：${question:-请补充必要信息。}"
+            __tmksh_print_message "需要澄清：${question:-请补充必要信息。}"
+            if (( clarification_count >= 3 )); then
+                __tmksh_print_message '澄清次数过多，已保留原命令。'
+                BUFFER="$original_buffer"
+                CURSOR=$original_cursor
+                return 0
+            fi
             if ! __tmksh_read_input '补充> '; then
                 BUFFER="$original_buffer"
                 CURSOR=$original_cursor
                 return 0
             fi
-            answer="$REPLY"
-            if [[ -z "${answer//[[:space:]]/}" ]]; then
+            clarification_answer="$REPLY"
+            if [[ -z "${clarification_answer//[[:space:]]/}" ]]; then
                 BUFFER="$original_buffer"
                 CURSOR=$original_cursor
                 return 0
             fi
-            request+=$'\n\n'"澄清问题：$question"$'\n'"用户补充：$answer"
-            (( attempts += 1 ))
+            request+=$'\n\n'"澄清问题：$question"$'\n'"用户补充：$clarification_answer"
+            (( clarification_count += 1 ))
             continue
         fi
 
         message="$(printf '%s' "$response" | __tmksh_json_field message)"
-        __tmksh_zle_message "${message:-tmksh 请求失败（退出码 $exit_status）。}"
+        __tmksh_print_message "${message:-tmksh 请求失败（退出码 $exit_status）。}"
         BUFFER="$original_buffer"
         CURSOR=$original_cursor
         return 0
     done
-
-    __tmksh_zle_message '澄清次数过多，已保留原命令。'
-    BUFFER="$original_buffer"
-    CURSOR=$original_cursor
 }
 
 if [[ -o interactive ]]; then

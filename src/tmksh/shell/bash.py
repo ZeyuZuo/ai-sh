@@ -42,6 +42,7 @@ TMKSH_LAST_FAILED_COMMAND=""
 TMKSH_LAST_FAILED_STATUS=""
 TMKSH_LAST_FAILED_CWD=""
 TMKSH_LAST_FAILED_SHELL=""
+TMKSH_LAST_COMMAND=""
 TMKSH_LAST_SEEN_HISTORY_NUMBER=""
 TMKSH_LAST_SEEN_HISTORY_COMMAND=""
 __tmksh_history_number=""
@@ -72,16 +73,20 @@ __tmksh_capture_failed_command() {
 
     __tmksh_read_history_entry
 
-    if (( exit_status != 0 )); then
-        # erasedups can replace an older entry without changing its display number.
-        if [[ -n "$__tmksh_history_number" && -n "$__tmksh_history_command" ]] \
-            && [[ "$__tmksh_history_number" != "${TMKSH_LAST_SEEN_HISTORY_NUMBER:-}" \
-                || "$__tmksh_history_command" != "${TMKSH_LAST_SEEN_HISTORY_COMMAND:-}" ]]; then
+    # erasedups can replace an older entry without changing its display number.
+    if [[ -n "$__tmksh_history_number" && -n "$__tmksh_history_command" ]] \
+        && [[ "$__tmksh_history_number" != "${TMKSH_LAST_SEEN_HISTORY_NUMBER:-}" \
+            || "$__tmksh_history_command" != "${TMKSH_LAST_SEEN_HISTORY_COMMAND:-}" ]]; then
+        TMKSH_LAST_COMMAND="$__tmksh_history_command"
+        if (( exit_status != 0 )); then
             TMKSH_LAST_FAILED_COMMAND="$__tmksh_history_command"
             TMKSH_LAST_FAILED_STATUS="$exit_status"
             TMKSH_LAST_FAILED_CWD="${TMKSH_COMMAND_CWD:-$PWD}"
             TMKSH_LAST_FAILED_SHELL="bash"
-        else
+        fi
+    else
+        TMKSH_LAST_COMMAND=""
+        if (( exit_status != 0 )); then
             TMKSH_LAST_FAILED_COMMAND=""
             TMKSH_LAST_FAILED_STATUS=""
             TMKSH_LAST_FAILED_CWD=""
@@ -152,17 +157,19 @@ __tmksh_widget() {
     local original_point="$READLINE_POINT"
     local request=""
     local response=""
+    local kind=""
     local command=""
     local message=""
     local question=""
-    local answer=""
+    local clarification_answer=""
     local REPLY=""
     local status=0
-    local attempts=0
+    local clarification_count=0
     local failed_command="${TMKSH_LAST_FAILED_COMMAND:-}"
     local failed_status="${TMKSH_LAST_FAILED_STATUS:-}"
     local failed_cwd="${TMKSH_LAST_FAILED_CWD:-}"
     local failed_shell="${TMKSH_LAST_FAILED_SHELL:-}"
+    local last_command="${TMKSH_LAST_COMMAND:-}"
 
     printf '\n'
     if ! __tmksh_read_input 'tmksh> '; then
@@ -177,16 +184,17 @@ __tmksh_widget() {
         return 0
     fi
 
-    while (( attempts < 3 )); do
+    while :; do
         response="$(
-            printf '%s\0%s\0%s\0%s\0%s\0%s' \
+            printf '%s\0%s\0%s\0%s\0%s\0%s\0%s' \
                 "$request" "$original_line" "$failed_command" \
-                "$failed_status" "$failed_cwd" "$failed_shell" \
+                "$failed_status" "$failed_cwd" "$failed_shell" "$last_command" \
                 | "$TMKSH_COMMAND" suggest --input-format nul
         )"
         status=$?
+        kind="$(printf '%s' "$response" | __tmksh_json_field kind)"
 
-        if (( status == 0 )); then
+        if (( status == 0 )) && [[ "$kind" == "command" ]]; then
             command="$(printf '%s' "$response" | __tmksh_json_field command)"
             message="$(printf '%s' "$response" | __tmksh_json_field message)"
             if [[ -z "$command" ]]; then
@@ -201,22 +209,36 @@ __tmksh_widget() {
             return 0
         fi
 
-        if (( status == 30 )); then
+        if (( status == 0 )) && [[ "$kind" == "answer" ]]; then
+            message="$(printf '%s' "$response" | __tmksh_json_field message)"
+            printf '%s\n' "${message:-tmksh did not return a usable result.}"
+            READLINE_LINE="$original_line"
+            READLINE_POINT="$original_point"
+            return 0
+        fi
+
+        if (( status == 30 )) && [[ "$kind" == "clarification" ]]; then
             question="$(printf '%s' "$response" | __tmksh_json_field clarification)"
             printf '%s\n' "需要澄清：${question:-请补充必要信息。}"
+            if (( clarification_count >= 3 )); then
+                printf '%s\n' '澄清次数过多，已保留原命令。'
+                READLINE_LINE="$original_line"
+                READLINE_POINT="$original_point"
+                return 0
+            fi
             if ! __tmksh_read_input '补充> '; then
                 READLINE_LINE="$original_line"
                 READLINE_POINT="$original_point"
                 return 0
             fi
-            answer="$REPLY"
-            if [[ -z "${answer//[[:space:]]/}" ]]; then
+            clarification_answer="$REPLY"
+            if [[ -z "${clarification_answer//[[:space:]]/}" ]]; then
                 READLINE_LINE="$original_line"
                 READLINE_POINT="$original_point"
                 return 0
             fi
-            request+=$'\n\n'"澄清问题：$question"$'\n'"用户补充：$answer"
-            (( attempts += 1 ))
+            request+=$'\n\n'"澄清问题：$question"$'\n'"用户补充：$clarification_answer"
+            (( clarification_count += 1 ))
             continue
         fi
 
@@ -226,10 +248,6 @@ __tmksh_widget() {
         READLINE_POINT="$original_point"
         return 0
     done
-
-    printf '%s\n' '澄清次数过多，已保留原命令。'
-    READLINE_LINE="$original_line"
-    READLINE_POINT="$original_point"
 }
 
 if [[ $- == *i* ]]; then

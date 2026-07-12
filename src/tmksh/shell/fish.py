@@ -35,8 +35,10 @@ end
 if not set -q TMKSH_PYTHON
     set -g TMKSH_PYTHON @@TMKSH_PYTHON@@
 end
+set -g TMKSH_LAST_COMMAND ""
 
 function __tmksh_capture_command_start --on-event fish_preexec
+    set -g TMKSH_LAST_COMMAND "$argv[1]"
     set -g TMKSH_PENDING_COMMAND "$argv[1]"
     set -g TMKSH_PENDING_CWD "$PWD"
 end
@@ -79,21 +81,23 @@ function __tmksh_widget
         return 0
     end
 
-    set -l attempts 0
+    set -l clarification_count 0
     set -l failed_command "$TMKSH_LAST_FAILED_COMMAND"
     set -l failed_status "$TMKSH_LAST_FAILED_STATUS"
     set -l failed_cwd "$TMKSH_LAST_FAILED_CWD"
     set -l failed_shell "$TMKSH_LAST_FAILED_SHELL"
-    while test $attempts -lt 3
-        set -l response (printf '%s\0%s\0%s\0%s\0%s\0%s' \
+    set -l last_command "$TMKSH_LAST_COMMAND"
+    while true
+        set -l response (printf '%s\0%s\0%s\0%s\0%s\0%s\0%s' \
             "$request" "$original_buffer" "$failed_command" \
-            "$failed_status" "$failed_cwd" "$failed_shell" \
+            "$failed_status" "$failed_cwd" "$failed_shell" "$last_command" \
             | "$TMKSH_COMMAND" suggest --input-format nul)
         set -l exit_status $status
+        set -l kind (printf '%s' "$response" | __tmksh_json_field kind | string collect)
 
-        if test $exit_status -eq 0
-            set -l generated_command (printf '%s' "$response" | __tmksh_json_field command)
-            set -l message (printf '%s' "$response" | __tmksh_json_field message)
+        if test $exit_status -eq 0; and test "$kind" = command
+            set -l generated_command (printf '%s' "$response" | __tmksh_json_field command | string collect)
+            set -l message (printf '%s' "$response" | __tmksh_json_field message | string collect)
             if test -z "$generated_command"
                 test -n "$message"; and printf '%s\n' "$message"
                 commandline --replace "$original_buffer"
@@ -106,37 +110,48 @@ function __tmksh_widget
             return 0
         end
 
-        if test $exit_status -eq 30
-            set -l question (printf '%s' "$response" | __tmksh_json_field clarification)
+        if test $exit_status -eq 0; and test "$kind" = answer
+            set -l message (printf '%s' "$response" | __tmksh_json_field message | string collect)
+            test -n "$message"; or set message 'tmksh did not return a usable result.'
+            printf '%s\n' "$message"
+            commandline --replace "$original_buffer"
+            commandline --cursor "$original_cursor"
+            return 0
+        end
+
+        if test $exit_status -eq 30; and test "$kind" = clarification
+            set -l question (printf '%s' "$response" | __tmksh_json_field clarification | string collect)
             test -n "$question"; or set question '请补充必要信息。'
             printf '%s\n' "需要澄清：$question"
-            set -l answer (__tmksh_read_input '补充> ')
+            if test $clarification_count -ge 3
+                printf '%s\n' '澄清次数过多，已保留原命令。'
+                commandline --replace "$original_buffer"
+                commandline --cursor "$original_cursor"
+                return 0
+            end
+            set -l clarification_answer (__tmksh_read_input '补充> ')
             or begin
                 commandline --replace "$original_buffer"
                 commandline --cursor "$original_cursor"
                 return 0
             end
-            if test -z (string trim -- "$answer")
+            if test -z (string trim -- "$clarification_answer")
                 commandline --replace "$original_buffer"
                 commandline --cursor "$original_cursor"
                 return 0
             end
-            set request "$request\n\n澄清问题：$question\n用户补充：$answer"
-            set attempts (math $attempts + 1)
+            set request "$request\n\n澄清问题：$question\n用户补充：$clarification_answer"
+            set clarification_count (math $clarification_count + 1)
             continue
         end
 
-        set -l message (printf '%s' "$response" | __tmksh_json_field message)
+        set -l message (printf '%s' "$response" | __tmksh_json_field message | string collect)
         test -n "$message"; or set message "tmksh 请求失败（退出码 $exit_status）。"
         printf '%s\n' "$message"
         commandline --replace "$original_buffer"
         commandline --cursor "$original_cursor"
         return 0
     end
-
-    printf '%s\n' '澄清次数过多，已保留原命令。'
-    commandline --replace "$original_buffer"
-    commandline --cursor "$original_cursor"
 end
 
 if status is-interactive

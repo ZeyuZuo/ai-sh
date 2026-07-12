@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from tmksh.cli import tmksh
@@ -21,6 +22,7 @@ def test_bash_init_command_outputs_loadable_script() -> None:
     assert "__tmksh_sync_history_state" in invocation.stdout
     assert "PROMPT_COMMAND" in invocation.stdout
     assert 'TMKSH_LAST_FAILED_COMMAND=""' in invocation.stdout
+    assert 'TMKSH_LAST_COMMAND=""' in invocation.stdout
     assert 'TMKSH_LAST_SEEN_HISTORY_COMMAND=""' in invocation.stdout
 
     syntax = subprocess.run(
@@ -128,12 +130,42 @@ def test_bash_widget_handles_clarification_in_same_interaction(tmp_path) -> None
     assert _line_from_output(completed.stdout) == "find . ./src"
 
 
+def test_bash_widget_displays_multiline_answer_without_inserting_command(
+    tmp_path,
+) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="answer\n",
+        original_line="keep --this",
+        original_point=4,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "第一行\n\n第三行" in completed.stdout
+    assert "tmksh did not return a command" not in completed.stdout
+    assert _line_from_output(completed.stdout) == "keep --this"
+    assert _point_from_output(completed.stdout) == 4
+
+
+def test_bash_widget_sends_all_three_clarification_answers(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="clarify-three\n答案一\n答案二\n答案三\n",
+        original_line="keep this",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.count("需要澄清：") == 3
+    assert _line_from_output(completed.stdout) == "clarified with 3 answers"
+
+
 def test_bash_failure_hook_records_current_interactive_command(tmp_path) -> None:
     completed = _run_interactive_bash(
         tmp_path,
         after_init="""
 __tmksh_missing_command__
-printf '\n__TMKSH_STATE__=%s\\0%s\\0%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" "$TMKSH_LAST_FAILED_SHELL"
+true
+printf '\n__TMKSH_STATE__=%s\\0%s\\0%s\\0%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" "$TMKSH_LAST_FAILED_SHELL" "$TMKSH_LAST_COMMAND"
 """,
     )
 
@@ -144,6 +176,7 @@ printf '\n__TMKSH_STATE__=%s\\0%s\\0%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TM
         "127",
         str(tmp_path),
         "bash",
+        "true",
     ]
 
 
@@ -219,6 +252,36 @@ printf '\n__TMKSH_STATE__=%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_F
     assert state.split("\0") == ["", ""]
 
 
+@pytest.mark.parametrize(
+    ("before_init", "commands"),
+    [
+        pytest.param("HISTCONTROL=ignorespace", "true\n true", id="ignorespace"),
+        pytest.param(
+            "HISTIGNORE=ignored_success\nignored_success() { return 0; }",
+            "true\nignored_success",
+            id="histignore",
+        ),
+        pytest.param("", "true\nset +o history\ntrue", id="history-disabled"),
+    ],
+)
+def test_bash_last_command_clears_when_current_command_is_not_in_history(
+    tmp_path,
+    before_init: str,
+    commands: str,
+) -> None:
+    completed = _run_interactive_bash(
+        tmp_path,
+        before_init=before_init,
+        after_init=(
+            f"{commands}\nprintf '\\n__TMKSH_LAST__=%s\\n' \"$TMKSH_LAST_COMMAND\""
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    last_command = completed.stdout.split("__TMKSH_LAST__=", 1)[1].splitlines()[0]
+    assert last_command == ""
+
+
 def test_bash_widget_sends_failure_state_for_fix(tmp_path) -> None:
     completed = _run_widget(
         tmp_path,
@@ -233,6 +296,18 @@ def test_bash_widget_sends_failure_state_for_fix(tmp_path) -> None:
     assert _line_from_output(completed.stdout) == (
         "fixed[bash:1:/tmp/demo project]: python app.py"
     )
+
+
+def test_bash_widget_sends_last_command_context(tmp_path) -> None:
+    completed = _run_widget(
+        tmp_path,
+        user_input="last-command\n",
+        original_line="keep this",
+        last_command="git status --short",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert _line_from_output(completed.stdout) == "last[git status --short]"
 
 
 def test_bash_fix_restores_buffer_without_failure_state(tmp_path) -> None:
@@ -277,6 +352,7 @@ def _run_widget(
     failed_command: str = "",
     failed_status: int | None = None,
     failed_cwd: str = "",
+    last_command: str = "",
 ) -> subprocess.CompletedProcess[str]:
     backend = _write_fake_backend(tmp_path)
     init_path = tmp_path / "bash-init.sh"
@@ -295,6 +371,7 @@ TMKSH_LAST_FAILED_COMMAND="$4"
 TMKSH_LAST_FAILED_STATUS="$5"
 TMKSH_LAST_FAILED_CWD="$6"
 TMKSH_LAST_FAILED_SHELL="${4:+bash}"
+TMKSH_LAST_COMMAND="$7"
 __tmksh_widget
 printf '\n__TMKSH_LINE__=%s\n' "$READLINE_LINE"
 printf '__TMKSH_POINT__=%s\n' "$READLINE_POINT"
@@ -313,6 +390,7 @@ printf '__TMKSH_POINT__=%s\n' "$READLINE_POINT"
             failed_command,
             "" if failed_status is None else str(failed_status),
             failed_cwd,
+            last_command,
         ],
         input=user_input,
         text=True,
@@ -366,7 +444,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "_prompt":
     raise SystemExit(0)
 
 parts = sys.stdin.buffer.read().split(b"\\0")
-request, buffer, failed_command, failed_status, failed_cwd, failed_shell = (
+request, buffer, failed_command, failed_status, failed_cwd, failed_shell, last_command = (
     part.decode() for part in parts
 )
 response = {{
@@ -394,6 +472,10 @@ elif request.lower().startswith("/fix"):
     response.update(
         command=f"fixed[{{failed_shell}}:{{failed_status}}:{{failed_cwd}}]: {{failed_command}}"
     )
+elif request == "answer":
+    response.update(kind="answer", command="rm -rf /", answer="第一行\\n\\n第三行")
+elif request == "last-command":
+    response.update(command=f"last[{{last_command}}]")
 elif "block" in request:
     response.update(kind="blocked", command="", risk_level="danger", risk_reason="删除根目录")
     status = 31
@@ -402,6 +484,17 @@ elif "caution" in request:
 elif "error" in request:
     response.update(kind="error", command="", error="连接 AI 服务失败")
     status = 21
+elif request.startswith("clarify-three"):
+    answer_count = request.count("用户补充：")
+    if answer_count < 3:
+        response.update(
+            kind="clarification",
+            command="",
+            clarification=f"请提供第 {{answer_count + 1}} 个答案。",
+        )
+        status = 30
+    else:
+        response.update(command="clarified with 3 answers")
 elif "clarify" in request and "用户补充" not in request:
     response.update(kind="clarification", command="", clarification="请提供目录。")
     status = 30
