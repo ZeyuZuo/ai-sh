@@ -41,20 +41,38 @@ TMKSH_COMMAND_CWD="${TMKSH_COMMAND_CWD:-$PWD}"
 
 __tmksh_capture_failed_command() {
     local exit_status=$?
+    local history_entry=""
+    local history_number=""
     local command=""
 
+    history_entry="$(HISTTIMEFORMAT= builtin history 1 2>/dev/null)" \
+        || history_entry=""
+    while [[ "$history_entry" == [[:space:]]* ]]; do
+        history_entry="${history_entry:1}"
+    done
+    history_number="${history_entry%%[![:digit:]]*}"
+    command="${history_entry#"$history_number"}"
+    [[ "$command" == \** ]] && command="${command:1}"
+    while [[ "$command" == [[:space:]]* ]]; do
+        command="${command:1}"
+    done
+
     if (( exit_status != 0 )); then
-        command="$(HISTTIMEFORMAT= builtin fc -ln -1 2>/dev/null)" || command=""
-        while [[ "$command" == [[:space:]]* ]]; do
-            command="${command:1}"
-        done
-        if [[ -n "$command" ]]; then
+        if [[ -n "$history_number" \
+            && "$history_number" != "${TMKSH_LAST_SEEN_HISTORY_NUMBER:-}" \
+            && -n "$command" ]]; then
             TMKSH_LAST_FAILED_COMMAND="$command"
             TMKSH_LAST_FAILED_STATUS="$exit_status"
             TMKSH_LAST_FAILED_CWD="${TMKSH_COMMAND_CWD:-$PWD}"
             TMKSH_LAST_FAILED_SHELL="bash"
+        else
+            TMKSH_LAST_FAILED_COMMAND=""
+            TMKSH_LAST_FAILED_STATUS=""
+            TMKSH_LAST_FAILED_CWD=""
+            TMKSH_LAST_FAILED_SHELL=""
         fi
     fi
+    TMKSH_LAST_SEEN_HISTORY_NUMBER="$history_number"
     TMKSH_COMMAND_CWD="$PWD"
     return "$exit_status"
 }

@@ -125,34 +125,64 @@ def test_bash_widget_handles_clarification_in_same_interaction(tmp_path) -> None
     assert _line_from_output(completed.stdout) == "find . ./src"
 
 
-def test_bash_failure_hook_records_nonzero_command_state() -> None:
-    script = render_bash_init(command_path="tmksh", python_path=sys.executable)
-    shell_code = r"""
-set -o history
-source "$1"
-TMKSH_COMMAND_CWD='/tmp/original cwd'
-history -s 'python missing.py'
-(exit 7)
-__tmksh_capture_failed_command
-printf '%s\0%s\0%s\0%s' "$TMKSH_LAST_FAILED_COMMAND" \
-    "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" \
-    "$TMKSH_LAST_FAILED_SHELL"
+def test_bash_failure_hook_records_current_interactive_command(tmp_path) -> None:
+    init_path = tmp_path / "bash-init.sh"
+    init_path.write_text(
+        render_bash_init(command_path="tmksh", python_path=sys.executable),
+        encoding="utf-8",
+    )
+    commands = f"""source {init_path!s}
+__tmksh_missing_command__
+printf '\n__TMKSH_STATE__=%s\\0%s\\0%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" "$TMKSH_LAST_FAILED_SHELL"
+exit
 """
     completed = subprocess.run(
-        ["bash", "--noprofile", "--norc", "-c", shell_code, "bash", "/dev/stdin"],
-        input=script,
+        ["bash", "--noprofile", "--norc", "-i"],
+        input=commands,
         text=True,
         capture_output=True,
         check=False,
+        cwd=tmp_path,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "PS1": "", "PS2": ""},
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.split("\0") == [
-        "(exit 7)",
-        "7",
-        "/tmp/original cwd",
+    state = completed.stdout.split("__TMKSH_STATE__=", 1)[1].splitlines()[0]
+    assert state.split("\0") == [
+        "__tmksh_missing_command__",
+        "127",
+        str(tmp_path),
         "bash",
     ]
+
+
+def test_bash_failure_hook_does_not_pair_old_history_with_ignored_command(
+    tmp_path,
+) -> None:
+    init_path = tmp_path / "bash-init.sh"
+    init_path.write_text(
+        render_bash_init(command_path="tmksh", python_path=sys.executable),
+        encoding="utf-8",
+    )
+    commands = f"""HISTCONTROL=ignorespace
+source {init_path!s}
+ __tmksh_ignored_missing_command__
+printf '\n__TMKSH_STATE__=%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS"
+exit
+"""
+    completed = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-i"],
+        input=commands,
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "PS1": "", "PS2": ""},
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    state = completed.stdout.split("__TMKSH_STATE__=", 1)[1].splitlines()[0]
+    assert state.split("\0") == ["", ""]
 
 
 def test_bash_widget_sends_failure_state_for_fix(tmp_path) -> None:

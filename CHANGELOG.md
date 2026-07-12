@@ -10,6 +10,11 @@
 - Bash、Zsh 和 Fish 集成会在本地保存最近失败命令、退出码、执行目录和 Shell 类型。
 - `protocol_version=1` 增加可选 `failed_command` 上下文，并保持旧 JSON 和双字段 NUL 客户端兼容。
 
+### Fixed
+
+- 修复 Bash `PROMPT_COMMAND` 中使用 `fc` 读取到上一条历史，导致失败退出码与旧命令错误配对的问题。
+- 当前命令被 Bash 历史规则忽略时，不再把失败状态错误关联到旧历史命令。
+
 ### Security
 
 - `/fix` 结果经过与普通建议相同的 AI danger 判断和本地硬拦截。
