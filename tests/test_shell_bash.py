@@ -18,8 +18,10 @@ def test_bash_init_command_outputs_loadable_script() -> None:
     assert "suggest --input-format nul" in invocation.stdout
     assert '_prompt --label "$prompt"' in invocation.stdout
     assert "__tmksh_capture_failed_command" in invocation.stdout
+    assert "__tmksh_sync_history_state" in invocation.stdout
     assert "PROMPT_COMMAND" in invocation.stdout
     assert 'TMKSH_LAST_FAILED_COMMAND=""' in invocation.stdout
+    assert 'TMKSH_LAST_SEEN_HISTORY_COMMAND=""' in invocation.stdout
 
     syntax = subprocess.run(
         ["bash", "-n"],
@@ -127,24 +129,12 @@ def test_bash_widget_handles_clarification_in_same_interaction(tmp_path) -> None
 
 
 def test_bash_failure_hook_records_current_interactive_command(tmp_path) -> None:
-    init_path = tmp_path / "bash-init.sh"
-    init_path.write_text(
-        render_bash_init(command_path="tmksh", python_path=sys.executable),
-        encoding="utf-8",
-    )
-    commands = f"""source {init_path!s}
+    completed = _run_interactive_bash(
+        tmp_path,
+        after_init="""
 __tmksh_missing_command__
 printf '\n__TMKSH_STATE__=%s\\0%s\\0%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" "$TMKSH_LAST_FAILED_SHELL"
-exit
-"""
-    completed = subprocess.run(
-        ["bash", "--noprofile", "--norc", "-i"],
-        input=commands,
-        text=True,
-        capture_output=True,
-        check=False,
-        cwd=tmp_path,
-        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "PS1": "", "PS2": ""},
+""",
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -157,28 +147,71 @@ exit
     ]
 
 
+def test_bash_failure_hook_handles_erasedups_history_number_reuse(tmp_path) -> None:
+    completed = _run_interactive_bash(
+        tmp_path,
+        before_init="""HISTCONTROL=ignoreboth:erasedups
+__tmksh_existing_prompt_hook() { return 0; }
+PROMPT_COMMAND=(__tmksh_existing_prompt_hook)
+__tmksh_repeated_missing__
+""",
+        after_init="""__tmksh_repeated_missing__
+printf '\n__TMKSH_STATE__=%s\\0%s\\0%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS" "$TMKSH_LAST_FAILED_CWD" "$TMKSH_LAST_FAILED_SHELL"
+printf '__TMKSH_PROMPT__=%s\\0%s\\0%s\n' "${PROMPT_COMMAND[0]}" "${PROMPT_COMMAND[1]}" "${PROMPT_COMMAND[2]}"
+""",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    state = completed.stdout.split("__TMKSH_STATE__=", 1)[1].splitlines()[0]
+    assert state.split("\0") == [
+        "__tmksh_repeated_missing__",
+        "127",
+        str(tmp_path),
+        "bash",
+    ]
+    prompt = completed.stdout.split("__TMKSH_PROMPT__=", 1)[1].splitlines()[0]
+    assert prompt.split("\0") == [
+        "__tmksh_capture_failed_command",
+        "__tmksh_existing_prompt_hook",
+        "__tmksh_sync_history_state",
+    ]
+
+
+def test_bash_failure_hook_syncs_history_after_existing_prompt_hooks(
+    tmp_path,
+) -> None:
+    completed = _run_interactive_bash(
+        tmp_path,
+        before_init="""HISTCONTROL=ignorespace
+__tmksh_existing_prompt_hook() {
+    if [[ -n "${TMKSH_INJECT_HISTORY:-}" ]]; then
+        history -s "$TMKSH_INJECT_HISTORY"
+        TMKSH_INJECT_HISTORY=""
+    fi
+}
+PROMPT_COMMAND=(__tmksh_existing_prompt_hook)
+""",
+        after_init="""TMKSH_INJECT_HISTORY='external command'
+ __tmksh_ignored_missing_command__
+printf '\n__TMKSH_STATE__=%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS"
+""",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    state = completed.stdout.split("__TMKSH_STATE__=", 1)[1].splitlines()[0]
+    assert state.split("\0") == ["", ""]
+
+
 def test_bash_failure_hook_does_not_pair_old_history_with_ignored_command(
     tmp_path,
 ) -> None:
-    init_path = tmp_path / "bash-init.sh"
-    init_path.write_text(
-        render_bash_init(command_path="tmksh", python_path=sys.executable),
-        encoding="utf-8",
-    )
-    commands = f"""HISTCONTROL=ignorespace
-source {init_path!s}
+    completed = _run_interactive_bash(
+        tmp_path,
+        before_init="HISTCONTROL=ignorespace",
+        after_init="""
  __tmksh_ignored_missing_command__
 printf '\n__TMKSH_STATE__=%s\\0%s\n' "$TMKSH_LAST_FAILED_COMMAND" "$TMKSH_LAST_FAILED_STATUS"
-exit
-"""
-    completed = subprocess.run(
-        ["bash", "--noprofile", "--norc", "-i"],
-        input=commands,
-        text=True,
-        capture_output=True,
-        check=False,
-        cwd=tmp_path,
-        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "PS1": "", "PS2": ""},
+""",
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -285,6 +318,33 @@ printf '__TMKSH_POINT__=%s\n' "$READLINE_POINT"
         text=True,
         capture_output=True,
         check=False,
+    )
+
+
+def _run_interactive_bash(
+    tmp_path: Path,
+    *,
+    after_init: str,
+    before_init: str = "",
+) -> subprocess.CompletedProcess[str]:
+    init_path = tmp_path / "bash-init.sh"
+    init_path.write_text(
+        render_bash_init(command_path="tmksh", python_path=sys.executable),
+        encoding="utf-8",
+    )
+    commands = "\n".join(
+        part
+        for part in (before_init, f"source {init_path!s}", after_init, "exit")
+        if part
+    )
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-i"],
+        input=commands + "\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "PS1": "", "PS2": ""},
     )
 
 

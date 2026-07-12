@@ -14,6 +14,8 @@
 
 - 修复 Bash `PROMPT_COMMAND` 中使用 `fc` 读取到上一条历史，导致失败退出码与旧命令错误配对的问题。
 - 当前命令被 Bash 历史规则忽略时，不再把失败状态错误关联到旧历史命令。
+- 修复 Bash `HISTCONTROL=erasedups` 复用历史编号时丢失失败命令状态的问题。
+- 在其他 prompt hook 完成历史同步后更新 Bash 基线，避免误配其他终端追加的命令。
 
 ### Security
 

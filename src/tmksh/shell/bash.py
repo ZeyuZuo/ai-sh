@@ -43,30 +43,41 @@ TMKSH_LAST_FAILED_STATUS=""
 TMKSH_LAST_FAILED_CWD=""
 TMKSH_LAST_FAILED_SHELL=""
 TMKSH_LAST_SEEN_HISTORY_NUMBER=""
+TMKSH_LAST_SEEN_HISTORY_COMMAND=""
+__tmksh_history_number=""
+__tmksh_history_command=""
 
-__tmksh_capture_failed_command() {
-    local exit_status=$?
+__tmksh_read_history_entry() {
     local history_entry=""
-    local history_number=""
-    local command=""
+
+    __tmksh_history_number=""
+    __tmksh_history_command=""
 
     history_entry="$(HISTTIMEFORMAT= builtin history 1 2>/dev/null)" \
         || history_entry=""
     while [[ "$history_entry" == [[:space:]]* ]]; do
         history_entry="${history_entry:1}"
     done
-    history_number="${history_entry%%[![:digit:]]*}"
-    command="${history_entry#"$history_number"}"
-    [[ "$command" == \** ]] && command="${command:1}"
-    while [[ "$command" == [[:space:]]* ]]; do
-        command="${command:1}"
+    __tmksh_history_number="${history_entry%%[![:digit:]]*}"
+    __tmksh_history_command="${history_entry#"$__tmksh_history_number"}"
+    [[ "$__tmksh_history_command" == \** ]] \
+        && __tmksh_history_command="${__tmksh_history_command:1}"
+    while [[ "$__tmksh_history_command" == [[:space:]]* ]]; do
+        __tmksh_history_command="${__tmksh_history_command:1}"
     done
+}
+
+__tmksh_capture_failed_command() {
+    local exit_status=$?
+
+    __tmksh_read_history_entry
 
     if (( exit_status != 0 )); then
-        if [[ -n "$history_number" \
-            && "$history_number" != "${TMKSH_LAST_SEEN_HISTORY_NUMBER:-}" \
-            && -n "$command" ]]; then
-            TMKSH_LAST_FAILED_COMMAND="$command"
+        # erasedups can replace an older entry without changing its display number.
+        if [[ -n "$__tmksh_history_number" && -n "$__tmksh_history_command" ]] \
+            && [[ "$__tmksh_history_number" != "${TMKSH_LAST_SEEN_HISTORY_NUMBER:-}" \
+                || "$__tmksh_history_command" != "${TMKSH_LAST_SEEN_HISTORY_COMMAND:-}" ]]; then
+            TMKSH_LAST_FAILED_COMMAND="$__tmksh_history_command"
             TMKSH_LAST_FAILED_STATUS="$exit_status"
             TMKSH_LAST_FAILED_CWD="${TMKSH_COMMAND_CWD:-$PWD}"
             TMKSH_LAST_FAILED_SHELL="bash"
@@ -77,23 +88,51 @@ __tmksh_capture_failed_command() {
             TMKSH_LAST_FAILED_SHELL=""
         fi
     fi
-    TMKSH_LAST_SEEN_HISTORY_NUMBER="$history_number"
-    TMKSH_COMMAND_CWD="$PWD"
     return "$exit_status"
+}
+
+__tmksh_sync_history_state() {
+    local prompt_status=$?
+
+    __tmksh_read_history_entry
+    TMKSH_LAST_SEEN_HISTORY_NUMBER="$__tmksh_history_number"
+    TMKSH_LAST_SEEN_HISTORY_COMMAND="$__tmksh_history_command"
+    TMKSH_COMMAND_CWD="$PWD"
+    return "$prompt_status"
 }
 
 __tmksh_install_prompt_hook() {
     local declaration=""
     local hook=""
+    local prompt_command=""
+    local -a prompt_hooks=()
+
     declaration="$(declare -p PROMPT_COMMAND 2>/dev/null)"
+    # Capture $? first, then sync after prompt hooks that may run history -n.
     if [[ "$declaration" == "declare -a"* ]]; then
         for hook in "${PROMPT_COMMAND[@]}"; do
-            [[ "$hook" == "__tmksh_capture_failed_command" ]] && return 0
+            if [[ "$hook" == "__tmksh_capture_failed_command" \
+                || "$hook" == "__tmksh_sync_history_state" ]]; then
+                continue
+            fi
+            prompt_hooks+=("$hook")
         done
-        PROMPT_COMMAND=(__tmksh_capture_failed_command "${PROMPT_COMMAND[@]}")
-    elif [[ ";${PROMPT_COMMAND:-};" != *";__tmksh_capture_failed_command;"* ]]; then
-        PROMPT_COMMAND="__tmksh_capture_failed_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+        PROMPT_COMMAND=(
+            __tmksh_capture_failed_command
+            "${prompt_hooks[@]}"
+            __tmksh_sync_history_state
+        )
+        return 0
     fi
+
+    prompt_command="${PROMPT_COMMAND:-}"
+    if [[ ";$prompt_command;" != *";__tmksh_capture_failed_command;"* ]]; then
+        prompt_command="__tmksh_capture_failed_command${prompt_command:+;$prompt_command}"
+    fi
+    if [[ ";$prompt_command;" != *";__tmksh_sync_history_state;"* ]]; then
+        prompt_command="${prompt_command:+$prompt_command;}__tmksh_sync_history_state"
+    fi
+    PROMPT_COMMAND="$prompt_command"
 }
 
 __tmksh_install_prompt_hook
